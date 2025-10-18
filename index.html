@@ -6,19 +6,11 @@
   <title>ChronoHit — Tap Reflex</title>
   <link rel="stylesheet" href="./assets/chronohit.css" />
 
-  <!-- GA4 (injected) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=__GA_MEASUREMENT_ID__"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', '__GA_MEASUREMENT_ID__', { anonymize_ip: true });
-  </script>
+  <!-- Dynamic GA4 (reads GA_MEASUREMENT_ID via /api/ga-config) -->
+  <script src="./assets/ga-loader.js"></script>
 
-  <!-- AdSense (injected) -->
-  <script async type="text/javascript"
-    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=__ADSENSE_PUB__"
-    crossorigin="anonymous"></script>
+  <!-- Dynamic AdSense (reads ADSENSE_* via /api/ads-config) -->
+  <script src="./assets/ads-loader.js"></script>
 </head>
 <body>
 <header class="header">
@@ -26,7 +18,7 @@
     <img src="./assets/logo.svg" alt="" />
     <span class="brand">ChronoHit</span>
   </a>
-  <nav class="navright">Vercel static • GitHub source</nav>
+  <nav class="navright"><span class="badge">LIVE</span></nav>
 </header>
 
 <main class="container">
@@ -35,19 +27,19 @@
     <p class="lead">Ultra-simple reaction test. Tap when the panel turns green.</p>
     <a class="btn" href="./games/tap-reflex/">Play now →</a>
   </section>
- 
+
   <section class="card">
-    <h2>Monetization</h2>
-    <ins class="adsbygoogle"
-         style="display:block; text-align:center;"
-         data-ad-client="__ADSENSE_PUB__"
-         data-ad-slot="__ADSENSE_SLOT_HOME__"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-    <script>(adsbygoogle=window.adsbygoogle||[]).push({});</script>
+    <h2>Ad</h2>
+    <!-- CLS-safe placeholder; ChronoAds will inject the responsive ad slot (home) -->
+    <div id="ad-home" class="placeholder-ad"></div>
   </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+
+<!-- Trigger dynamic ad load (call after consent if using CMP) -->
+<script>
+  window.ChronoAds && ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
+</script>
 </body>
 </html>
