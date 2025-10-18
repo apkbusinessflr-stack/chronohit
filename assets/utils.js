@@ -4,3 +4,4 @@ export const ls={
   set:(k,v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(_){ } }
 };
 export const fmtMs=v=>v==null?'—':Math.round(v).toString();
+
