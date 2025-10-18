@@ -1,6 +1,12 @@
-<!-- /assets/ads-loader.js -->
-<script>
-// Lightweight AdSense loader (no frameworks)
+// Lightweight AdSense dynamic loader (no frameworks)
+// Reads ADSENSE_* from /api/ads-config and injects the AdSense script + slots.
+// Usage in HTML:
+//   <script src="./assets/ads-loader.js"></script>        // on index.html
+//   <script src="../../assets/ads-loader.js"></script>    // on game pages
+// Then call:
+//   ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
+//   ChronoAds.load({ targetId: 'ad-tapreflex', slotKey: 'tapreflex' });
+
 window.ChronoAds = (function(){
   let cfg = null, scriptLoaded = false, queue = [];
 
@@ -33,7 +39,7 @@ window.ChronoAds = (function(){
 
   function renderSlot(el, client, slot){
     if (!el || !client || !slot) return;
-    el.innerHTML = ''; // clear placeholder
+    el.innerHTML = '';
     const ins = document.createElement('ins');
     ins.className = 'adsbygoogle';
     ins.style.display = 'block';
@@ -43,15 +49,13 @@ window.ChronoAds = (function(){
     ins.setAttribute('data-ad-format', 'auto');
     ins.setAttribute('data-full-width-responsive', 'true');
     el.appendChild(ins);
-
-    // queue render
     queue.push({});
     if (scriptLoaded) flushQueue();
   }
 
-  async function load({targetId, slotKey}){
+  async function load({ targetId, slotKey }){
     const conf = await fetchConfig();
-    if (!conf.enabled) return;
+    if (!conf.enabled) return; // AdSense disabled or misconfigured
     injectScript(conf.publisher);
     const slotId = (conf.slots||{})[slotKey];
     const target = document.getElementById(targetId);
@@ -60,4 +64,3 @@ window.ChronoAds = (function(){
 
   return { load };
 })();
-</script>
