@@ -1,0 +1,24 @@
+:root { --bg:#0b0f14; --surface:#0d1218; --text:#e7f0ff; --muted:#a7b1c2; --border:#1f2937; --accent:#FF3B3B; }
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+a{color:#00D1FF;text-decoration:none} a:hover{text-decoration:underline}
+.container{max-width:960px;margin:0 auto;padding:16px}
+.header{position:sticky;top:0;z-index:50;height:56px;background:#0c1016;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 12px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:900;letter-spacing:.5px}
+.logo .brand{color:var(--accent)} .logo img{width:28px;height:28px}
+.navright{margin-left:auto;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin:16px 0}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer}
+.lead{color:var(--muted)}
+.tap-area{user-select:none;height:320px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:36px;
+  background:#163221;border:1px solid var(--border);transition:background-color .15s}
+.tap-area.ready{background:#23161a;color:#fff}
+.tap-area.wait{background:#1e293b}
+.tap-area.go{background:#1e3a2a}
+.tap-area.too-soon{background:#3b1e1e}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.stat{flex:1 1 160px;background:#0d1218;border:1px solid var(--border);border-radius:12px;padding:10px}
+.stat .label{color:var(--muted);font-size:12px}
+.stat .value{font-weight:900;font-size:22px}
+.footer{color:var(--muted);padding:24px;text-align:center}
+.ad-slot{display:block;width:100%;min-height:60px;background:#0a0f15;border:1px dashed #203040;border-radius:12px}
