@@ -22,3 +22,5 @@ a{color:#00D1FF;text-decoration:none} a:hover{text-decoration:underline}
 .stat .value{font-weight:900;font-size:22px}
 .footer{color:var(--muted);padding:24px;text-align:center}
 .ad-slot{display:block;width:100%;min-height:60px;background:#0a0f15;border:1px dashed #203040;border-radius:12px}
+
+
