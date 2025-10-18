@@ -1,214 +1,96 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Reaction (Classic) — ChronoHit</title>
-  <link rel="stylesheet" href="../../assets/chronohit.css"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tap Reflex — ChronoHit</title>
+  <link rel="stylesheet" href="../../assets/chronohit.css" />
 
-  <style>
-    .padgrid{display:grid;gap:10px;margin-top:10px}
-    .pad{aspect-ratio:1/1;border:1px solid var(--border);border-radius:14px;background:#121922;display:flex;align-items:center;justify-content:center;font-weight:800}
-    .pad.active{background:#1f6838}
-    .topbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .select{background:#0e1420;border:1px solid var(--border);border-radius:10px;padding:8px 10px;color:var(--muted)}
-    .hud{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .hud .stat{min-width:140px}
-    .endbox{margin-top:12px;padding:12px;border:1px dashed var(--border);border-radius:12px}
-  </style>
+  <!-- Dynamic loaders -->
+  <script src="../../assets/ga-loader.js"></script>
+  <script src="../../assets/ads-loader.js"></script>
 
   <script type="module">
-    import { ls } from "../../assets/utils.js";
+    import { ls, getDeviceId, todayKey, fetchJSON } from "../../assets/utils.js";
+    const MIN_HUMAN_MS = 60;
+    const MODES = { easy:{label:"Easy",range:[1500,2700]}, default:{label:"Default",range:[1200,2400]}, hard:{label:"Hard",range:[900,1800]} };
+    const DAILY_LIMIT = 5, SUBMIT_MIN_ATTEMPTS = 5;
 
-    // ----- Config per difficulty (reaction window & cycles)
-    const DIFFS = {
-      easy:   { label: "Easy",   window:[700,800],  cycles:20, jitter:0,   layout:[3,4] },
-      medium: { label: "Medium", window:[500,600],  cycles:24, jitter:0,   layout:[3,4] },
-      hard:   { label: "Hard",   window:[350,450],  cycles:28, jitter:30,  layout:[3,4] },
-      insane: { label: "Insane", window:[250,320],  cycles:32, jitter:30,  layout:[3,4] }
+    let state="idle", startTs=0; let sum=0, attempts=0, bestSingle=null; let waitTimer=null; let mode="default";
+    const deviceId = getDeviceId();
+
+    let tapEl,lastEl,avgEl,bestEl,hiEl,attemptsEl,resetBtn,modeSel,submitBtn,leaderWrap,dailyCounterEl;
+
+    const vibrate=(ms)=>{ try{ if(navigator.vibrate) navigator.vibrate(ms);}catch(_){} };
+    const rnd=(a,b)=>Math.floor(a+Math.random()*(b-a+1));
+    const setState=(s,text,cls)=>{ state=s; tapEl.className=`tap-area ${cls||""}`.trim(); tapEl.textContent=text; };
+    const render=()=>{
+      lastEl.textContent = window._last==null ? "—" : Math.round(window._last);
+      avgEl.textContent  = attempts? Math.round(sum/attempts) : "—";
+      attemptsEl.textContent = attempts;
+      bestEl.textContent = bestSingle!=null? Math.round(bestSingle) : "—";
+      const hi = ls.get("tap.hiAvg", null);
+      hiEl.textContent = hi!=null? Math.round(hi) : "—";
+    };
+    const saveHi=()=>{ if(!attempts) return; const avg=sum/attempts; const prev=ls.get("tap.hiAvg",null); if(prev==null||avg<prev) ls.set("tap.hiAvg",Math.round(avg)); };
+    const resetSession=()=>{ if(waitTimer){clearTimeout(waitTimer); waitTimer=null;} sum=0; attempts=0; bestSingle=null; window._last=null; setState("idle","Tap to start","ready"); render(); };
+    const scheduleWait=()=>{ const [dmin,dmax]=MODES[mode].range; setState("waiting","Wait...","wait"); const wait=rnd(dmin,dmax); waitTimer=setTimeout(()=>{ startTs=performance.now(); setState("go","TAP!","go"); waitTimer=null; },wait); };
+    const onTap=()=>{
+      if(state==="idle"){ scheduleWait(); return; }
+      if(state==="waiting"){ setState("toosoon","Too soon!","too-soon"); setTimeout(resetSession,700); return; }
+      if(state==="go"){
+        const r = performance.now()-startTs; window._last=r;
+        if(r>=MIN_HUMAN_MS){ attempts++; sum+=r; if(bestSingle==null||r<bestSingle) bestSingle=r; saveHi(); vibrate(35); }
+        render(); setState("idle","Nice! Tap again","ready");
+      }
     };
 
-    // ----- State
-    let pads = [];
-    let active = -1;
-    let playing = false;
-    let cycleIdx = 0;
-    let startTs = 0;
-    let timerId = null;
-    let score = 0, penalties = 0, streak = 0, streakMax = 0;
-    let sum = 0, hits = 0, bestSingle = null;
-    let chosen = "easy";
-
-    // Elements
-    let grid, lastEl, avgEl, bestEl, streakEl, scoreEl, cyclesEl, diffSel, startBtn, endBox;
-
-    // Utils
-    const rnd = (a,b)=>a+Math.random()*(b-a)|0;
-    const now = ()=>performance.now();
-    const inHuman = (ms)=>ms>=60; // anti-cheat: reject <60ms
-
-    function layoutFor(diffKey){
-      const [cols, rows] = DIFFS[diffKey].layout;
-      return { cols, rows, n: cols*rows }; // 3x4=12 pads
-    }
-
-    function buildGrid(){
-      const { cols, rows, n } = layoutFor(chosen);
-      grid.style.gridTemplateColumns = `repeat(${cols},1fr)`;
-      grid.innerHTML = "";
-      pads = [];
-      for(let i=0;i<n;i++){
-        const b = document.createElement("button");
-        b.className = "pad";
-        b.setAttribute("aria-label", `Pad ${i+1}`);
-        b.addEventListener("click", ()=>onPad(i));
-        grid.appendChild(b);
-        pads.push(b);
+    async function refreshDaily(){
+      try{
+        const j = await fetchJSON(`/api/daily?device=${encodeURIComponent(deviceId)}&day=${todayKey()}`);
+        dailyCounterEl.textContent = `${j.used}/${DAILY_LIMIT}`;
+        submitBtn.disabled = !(attempts>=SUBMIT_MIN_ATTEMPTS) || (j.used>=DAILY_LIMIT);
+      }catch(e){
+        dailyCounterEl.textContent = `—/${DAILY_LIMIT}`;
+        submitBtn.disabled = !(attempts>=SUBMIT_MIN_ATTEMPTS);
       }
     }
-
-    function setActive(i){
-      if (active>=0) pads[active].classList.remove("active");
-      active = i;
-      if (i>=0) pads[i].classList.add("active");
+    async function submitDaily(){
+      if(attempts<SUBMIT_MIN_ATTEMPTS) return;
+      const avg=Math.round(sum/attempts), best=Math.round(bestSingle||0);
+      try{
+        const r = await fetchJSON("/api/score", { method:"POST", body:JSON.stringify({ device:deviceId, day:todayKey(), avg, best, attempts, mode }) });
+        await refreshDaily(); await loadLeaderboard(); alert(r.message||"Submitted!");
+      }catch(e){ alert(e.data?.error||e.message||"Submit failed"); }
+    }
+    async function loadLeaderboard(){
+      try{
+        const j = await fetchJSON(`/api/leaderboard?range=daily&day=${todayKey()}&limit=20`);
+        leaderWrap.innerHTML = renderTable(j.items||[]);
+      }catch(e){ leaderWrap.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
+    }
+    function renderTable(items){
+      if(!items.length) return `<div class="notice">No scores yet today. Be the first!</div>`;
+      const rows = items.map((it,idx)=>`<tr><td>${idx+1}</td><td>${it.avg} ms</td><td>${it.attempts}</td><td>${it.mode}</td></tr>`).join("");
+      return `<table class="table"><thead><tr><th>#</th><th>Avg</th><th>Attempts</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
-    function resetRound(){
-      clearTimeout(timerId);
-      timerId = null;
-      setActive(-1);
-      cycleIdx = 0;
-      score = 0; penalties = 0; streak = 0; streakMax = 0;
-      sum = 0; hits = 0; bestSingle = null;
-      updateHUD();
-      endBox.hidden = true;
-    }
+    window.addEventListener("DOMContentLoaded", async ()=>{
+      tapEl=document.getElementById("tap"); lastEl=document.getElementById("last"); avgEl=document.getElementById("avg");
+      bestEl=document.getElementById("best"); hiEl=document.getElementById("hi"); attemptsEl=document.getElementById("attempts");
+      resetBtn=document.getElementById("reset"); modeSel=document.getElementById("mode"); submitBtn=document.getElementById("submit");
+      leaderWrap=document.getElementById("leader"); dailyCounterEl=document.getElementById("daily-counter");
 
-    function updateHUD(){
-      cyclesEl.textContent = `${cycleIdx} / ${DIFFS[chosen].cycles}`;
-      scoreEl.textContent  = score;
-      streakEl.textContent = `${streak} (max ${streakMax})`;
-      lastEl.textContent   = (window._last==null? "—" : Math.round(window._last));
-      avgEl.textContent    = hits? Math.round(sum/hits) : "—";
-      bestEl.textContent   = bestSingle!=null? Math.round(bestSingle) : "—";
-    }
+      tapEl.addEventListener("click", onTap);
+      tapEl.addEventListener("keydown",(e)=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); onTap(); }});
+      resetBtn.addEventListener("click", ()=>{ resetSession(); refreshDaily(); });
+      modeSel.addEventListener("change",(e)=>{ mode=e.target.value; resetSession(); });
 
-    function scheduleNext(){
-      const d = DIFFS[chosen];
-      const [wMin, wMax] = d.window;
-      const windowMs = rnd(wMin, wMax) + (d.jitter? (Math.random()<0.5?-d.jitter:d.jitter):0);
-      const idx = rnd(0, pads.length-1);
-      setActive(idx);
-      startTs = now();
+      resetSession(); await refreshDaily(); await loadLeaderboard();
+      submitBtn.addEventListener("click", submitDaily);
 
-      // auto LATE if no tap in time window
-      timerId = setTimeout(()=>{
-        // player missed → LATE
-        setActive(-1);
-        penalties++;
-        streak = 0;
-        score -= 1;
-        cycleIdx++;
-        updateHUD();
-        nextCycle();
-      }, Math.max(120, windowMs)); // window guard
-    }
-
-    function onPad(i){
-      if (!playing) return;
-      if (i!==active){
-        // tap σε σβηστό → penalty
-        penalties++;
-        streak = 0;
-        score -= 1;
-        updateHUD();
-        return;
-      }
-      // HIT
-      const r = now()-startTs;
-      window._last = r;
-      if (inHuman(r)){
-        hits++;
-        sum += r;
-        if (bestSingle==null || r<bestSingle) bestSingle = r;
-        score += 1;
-        streak++;
-        if (streak>streakMax) streakMax = streak;
-      }
-      clearTimeout(timerId); timerId=null;
-      setActive(-1);
-      cycleIdx++;
-      updateHUD();
-      nextCycle();
-    }
-
-    function nextCycle(){
-      const d = DIFFS[chosen];
-      if (cycleIdx >= d.cycles){ return finish(); }
-      // μικρή παύση πριν το επόμενο άναμμα για ρυθμό
-      setTimeout(scheduleNext, 180);
-    }
-
-    function finish(){
-      playing = false;
-      setActive(-1);
-      // combo & speed bonus rules
-      let bonus = 0;
-      if (streakMax>=5) bonus += Math.floor(streakMax/5); // +1 ανά 5 streak
-      const avg = hits? (sum/hits) : null;
-      if (avg!=null && avg<300) bonus += 1; // speed bonus
-      const finalScore = score + bonus;
-
-      // αποθήκευση leader-ish (local)
-      const key = `reaction.hiAvg.${chosen}`;
-      const prev = ls.get(key, null);
-      if (avg!=null && (prev==null || avg<prev)) ls.set(key, Math.round(avg));
-
-      endBox.innerHTML = `
-        <div><b>Round summary</b></div>
-        <div>Score: <b>${finalScore}</b> (base ${score} / bonus ${bonus})</div>
-        <div>Avg reaction: <b>${avg!=null? Math.round(avg)+' ms' : '—'}</b></div>
-        <div>Best single: <b>${bestSingle!=null? Math.round(bestSingle)+' ms' : '—'}</b></div>
-        <div>Max streak: <b>${streakMax}</b></div>
-        <div>Penalties: <b>${penalties}</b></div>
-      `;
-      endBox.hidden = false;
-      startBtn.disabled = false;
-      startBtn.textContent = "Play again";
-    }
-
-    function start(){
-      if (playing) return;
-      resetRound();
-      playing = true;
-      startBtn.disabled = true;
-      startBtn.textContent = "Playing…";
-      scheduleNext();
-    }
-
-    window.addEventListener("DOMContentLoaded", ()=>{
-      // bind UI
-      grid      = document.getElementById("grid");
-      lastEl    = document.getElementById("last");
-      avgEl     = document.getElementById("avg");
-      bestEl    = document.getElementById("best");
-      streakEl  = document.getElementById("streak");
-      scoreEl   = document.getElementById("score");
-      cyclesEl  = document.getElementById("cycles");
-      diffSel   = document.getElementById("diff");
-      startBtn  = document.getElementById("start");
-      endBox    = document.getElementById("endbox");
-
-      // difficulty select
-      diffSel.addEventListener("change", (e)=>{
-        chosen = e.target.value;
-        buildGrid();
-        resetRound();
-      });
-
-      buildGrid();
-      resetRound();
-      startBtn.addEventListener("click", start);
+      // Inject the ad slot under stats
+      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-tapreflex', slotKey: 'tapreflex' });
     });
   </script>
 </head>
@@ -219,35 +101,42 @@
 
 <main class="container">
   <section class="card">
-    <h1>Reaction (Classic)</h1>
-    <p class="lead">Tap the lit pad within the reaction window. 10–12 pads grid, 20–32 cycles per round depending on difficulty.</p>
+    <div class="row"><h1 style="margin:0">Tap Reflex</h1><span class="badge">DAILY CHALLENGE</span></div>
+    <p class="lead">Wait until the panel turns green, then tap. Choose mode and submit your <b>Daily Challenge</b> (best average wins).</p>
 
-    <div class="topbar">
-      <select id="diff" class="select" aria-label="Difficulty">
-        <option value="easy">Easy — 700–800ms / 20 cycles</option>
-        <option value="medium">Medium — 500–600ms / 24 cycles</option>
-        <option value="hard">Hard — 350–450ms / 28 cycles (+jitter)</option>
-        <option value="insane">Insane — 250–320ms / 32 cycles (+jitter)</option>
+    <div class="row" style="margin-bottom:8px">
+      <label class="small">Mode:</label>
+      <select id="mode" class="select" aria-label="Mode">
+        <option value="easy">Easy (1.5–2.7s)</option>
+        <option value="default" selected>Default (1.2–2.4s)</option>
+        <option value="hard">Hard (0.9–1.8s)</option>
       </select>
-      <button id="start" class="btn">Start round</button>
+      <span class="small">Daily submissions used: <b id="daily-counter">—/5</b></span>
     </div>
 
-    <div id="grid" class="padgrid"></div>
+    <div id="tap" class="tap-area ready" tabindex="0" role="button" aria-label="Tap when it turns green">Tap to start</div>
 
-    <div class="hud">
-      <div class="stat"><div class="label">Cycle</div><div class="value" id="cycles">0 / 0</div></div>
-      <div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
-      <div class="stat"><div class="label">Streak (max)</div><div class="value" id="streak">0</div></div>
+    <div class="stats">
       <div class="stat"><div class="label">Last (ms)</div><div class="value" id="last">—</div></div>
       <div class="stat"><div class="label">Average (ms)</div><div class="value" id="avg">—</div></div>
+      <div class="stat"><div class="label">Attempts</div><div class="value" id="attempts">0</div></div>
       <div class="stat"><div class="label">Best single (ms)</div><div class="value" id="best">—</div></div>
+      <div class="stat"><div class="label">Hi-score (avg)</div><div class="value" id="hi">—</div></div>
     </div>
 
-    <div id="endbox" class="endbox" hidden></div>
+    <div class="row" style="margin-top:10px">
+      <button id="reset" class="btn" type="button">Reset session</button>
+      <button id="submit" class="btn" type="button" disabled>Submit to Daily Leaderboard</button>
+    </div>
 
-    <p class="lead" style="margin-top:8px">
-      Rules: +1 per HIT, −1 for LATE or wrong tap. Combo bonus +1 per 5-streak, speed bonus +1 if avg &lt; 300ms. Anti-cheat: reactions &lt; 60ms ignored.
-    </p>
+    <div id="leader" style="margin-top:12px"></div>
+    <p class="small">Anti-cheat: reactions &lt; 60ms ignored. No decimals. Anonymous device ID.</p>
+  </section>
+
+  <!-- Ad container under the game stats (dynamic via ChronoAds) -->
+  <section class="card">
+    <h2>Ad</h2>
+    <div id="ad-tapreflex" class="placeholder-ad"></div>
   </section>
 </main>
 
