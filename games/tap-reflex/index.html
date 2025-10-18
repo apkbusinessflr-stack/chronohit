@@ -6,7 +6,7 @@
   <title>Tap Reflex — ChronoHit</title>
   <link rel="stylesheet" href="../../assets/chronohit.css" />
   <script type="module">
-    import { ls, fmtMs } from "../../assets/utils.js";
+    import { ls } from "../../assets/utils.js";
     window.addEventListener('DOMContentLoaded', () => {
       const tap = document.getElementById('tap');
       const lastEl = document.getElementById('last');
@@ -94,6 +94,18 @@
       <div class="stat"><div class="label">Best single (ms)</div><div class="value" id="best">—</div></div>
       <div class="stat"><div class="label">Hi-score (avg)</div><div class="value" id="hi">—</div></div>
     </div>
+
+    <!-- Optional Ad in game page -->
+    <div style="margin-top:12px">
+      <ins class="adsbygoogle"
+          style="display:block; text-align:center;"
+          data-ad-client="__ADSENSE_PUB__"
+          data-ad-slot="__ADSENSE_SLOT_TAPREFLEX__"
+          data-ad-format="auto"
+          data-full-width-responsive="true"></ins>
+      <script>(adsbygoogle=window.adsbygoogle||[]).push({});</script>
+    </div>
+
     <p class="lead">Anti-cheat: reactions &lt; 60ms are ignored.</p>
   </section>
 </main>
