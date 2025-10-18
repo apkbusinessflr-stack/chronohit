@@ -1,7 +1,0 @@
-{
-  "name": "chronohit-tapreflex",
-  "private": true,
-  "scripts": {
-    "build": "node scripts/inject.mjs"
-  }
-}
