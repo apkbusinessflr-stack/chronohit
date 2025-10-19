@@ -11,176 +11,200 @@
   <script src="/assets/ads-loader.js"></script>
 
   <style>
-    /* ===== Arena ===== */
-    .arena{
-      position:relative; width:100%; height:360px;
-      background:#0b1117; border:1px solid var(--border);
-      border-radius:16px; overflow:hidden;
-    }
-    @media (min-width: 480px){ .arena{ height:420px; } }
-
-    /* ===== Target: red ring + dark fill (mobile-friendly) ===== */
+    .arena{ position:relative; width:100%; height:min(56vh,520px);
+            background:#0b0f14; border:1px solid var(--border); border-radius:16px; overflow:hidden; }
     .target{
-      position:absolute;
-      width:56px;height:56px;           /* θα υπερκαλυφθεί δυναμικά από JS */
-      border-radius:999px;
-      background:#171d24;               /* dark fill */
-      border:3px solid var(--accent);   /* red ring */
-      box-shadow:0 0 0 3px rgba(255,59,59,.18);
-      cursor:pointer; z-index:5;
-      transition:transform .08s ease, opacity .12s ease;
-      will-change:transform,opacity;
-      touch-action:manipulation;
+      position:absolute; border-radius:999px; cursor:pointer;
+      background:#271519; border:4px solid var(--accent);  /* red ring */
+      box-shadow:0 0 0 2px rgba(255,59,59,.08) inset, 0 6px 28px rgba(255,59,59,.08);
+      transform:translate(-50%,-50%) scale(1); opacity:.95;
+      animation:shrink linear forwards;
     }
-    .target:active{ transform:scale(.96); }
+    @keyframes shrink { from{ transform:translate(-50%,-50%) scale(1); opacity:.95 } to{ transform:translate(-50%,-50%) scale(.22); opacity:.6 } }
 
-    /* shrink όσο «ζει» ο στόχος */
-    @keyframes tr-shrink {
-      from { transform:scale(1); }
-      to   { transform:scale(.86); }
-    }
+    /* Timer bar */
+    .timer-wrap{margin:8px 0 12px; height:6px; background:#0e151c; border:1px solid var(--border); border-radius:999px; overflow:hidden}
+    .timer-fill{height:100%; width:0%; background:var(--accent); transition:width .16s linear}
 
-    /* HUD */
-    .hud{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px }
-    .hud .stat{ flex:1 1 160px }
-    .badge.note{ background:#1f2937 }
-    .modal{ display:none; }
-    .modal.open{ display:block; }
+    /* How to play modal */
+    .backdrop{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:90}
+    .modal{position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+      background:var(--surface); border:1px solid var(--border); border-radius:16px;
+      padding:16px; width:min(520px,92vw); display:none; z-index:91; box-shadow:0 10px 40px rgba(0,0,0,.5)}
+    .modal.open{display:block} .backdrop.open{display:block}
+
+    /* Center the controls */
+    .controls-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+    .controls-row.center{ justify-content:center }
   </style>
 
   <script type="module">
-    import { clamp, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+    import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
 
-    const deviceId = getDeviceId();
-
-    // Modes: trial = endless practice (τώρα ΜΕΤΡΑΕΙ misses)
+    /* ───── Config ───── */
+    const SESSION_MS = 25_000;       // 25 seconds
     const MODES = {
-      default: { label:"Default", lifeMs:1200 },
-      hard:    { label:"Hard",    lifeMs:900  },
-      trial:   { label:"Trial",   lifeMs:1100, endless:true }
+      easy:    { label:"Easy (1x)",    spawn:[800,1100], lifetime:[1100,1300], burst:{p:0, two:0, three:0}, maxLive:1, size:[58,78]  },
+      default: { label:"Default (1–2x)",spawn:[650,900],  lifetime:[1000,1150], burst:{p:.12, two:.10, three:.02}, maxLive:2, size:[54,74] },
+      hard:    { label:"Hard (2–3x)",  spawn:[480,720],  lifetime:[900,1050],  burst:{p:.35, two:.22, three:.13}, maxLive:3, size:[50,70]  },
+      trial:   { label:"Trial (endless)", spawn:[650,900], lifetime:[1000,1150], burst:{p:.12,two:.10,three:.02}, maxLive:2, size:[54,74], trial:true }
     };
+    const MIN_TOUCH_MS = 35; // μικρή προστασία double-tap ghosts
 
-    let mode   = "default";
-    let running = false;
-    let hits = 0, misses = 0;
+    /* ───── State ───── */
+    let mode = "default";
+    let running = false, sessionStart = 0, timerInt = null, spawnTO = null;
+    let live = 0, hits = 0, misses = 0;
 
-    let arenaEl, startBtn, modeSel, howBtn, howModal, closeHow, hitsEl, missesEl, dailyNote;
+    /* ───── Refs ───── */
+    let arena, timerFill, startBtn, howBtn, modeSel, hitsEl, missesEl, accEl, backdrop, modal, closeHow;
 
-    const rand = (a,b)=> Math.floor(a + Math.random()*(b-a+1));
+    /* ───── Utils ───── */
+    const rnd = (a,b)=>Math.floor(a+Math.random()*(b-a+1));
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const pct=(n,d)=>d>0? Math.round((n/d)*100):0;
 
-    const arenaBounds = ()=>{
-      const r = arenaEl.getBoundingClientRect();
-      return { w: Math.floor(r.width), h: Math.floor(r.height) };
-    };
-
-    function updateHUD(){
-      hitsEl.textContent   = hits;
-      missesEl.textContent = misses;
+    function sizeWithin(s){ // τυχαίο μέγεθος κοντά στο target
+      const [min,max] = MODES[mode].size;
+      return clamp(s ?? rnd(min,max), min, max);
     }
 
-    function resetGame(){
-      running = false;
-      hits = 0; misses = 0; updateHUD();
-      // καθάρισε targets
-      [...arenaEl.querySelectorAll('.target')].forEach(n=>n.remove());
+    /* ───── Game flow ───── */
+    function reset(){
+      clearInterval(timerInt); clearTimeout(spawnTO); timerInt=null; spawnTO=null;
+      running=false; sessionStart=0; live=0; hits=0; misses=0;
+      timerFill.style.width="0%";
+      updateHud();
+      // καθάρισε τυχόν targets
+      arena.querySelectorAll('.target').forEach(t=>t.remove());
     }
 
-    function maybeEnd(){
-      // Στα non-trial τελειώνουμε με 2 misses (auto-submit θα μπει όταν στήσουμε lb)
-      if (!MODES[mode].endless && misses >= 2){
-        endGame();
+    function start(){
+      reset(); running=true; sessionStart=performance.now();
+      // timer
+      timerInt=setInterval(()=>{
+        const p = clamp((performance.now()-sessionStart)/SESSION_MS,0,1);
+        timerFill.style.width=(p*100).toFixed(2)+'%';
+        if(p>=1){ end(); }
+      },120);
+      // αρχικό κύμα
+      scheduleSpawn(0);
+    }
+
+    function end(){
+      running=false;
+      clearInterval(timerInt); clearTimeout(spawnTO);
+      timerInt=null; spawnTO=null;
+      // auto-submit (non-trial)
+      if(!MODES[mode].trial){
+        const payload={ game:'targetrush', device:getDeviceId(), day:todayKey(), hits, misses, acc:pct(hits, hits+misses), mode };
+        // best-effort; αν δεν υπάρχει endpoint, απλώς αγνοεί
+        fetchJSON('/api/score', { method:'POST', body:JSON.stringify(payload)}).catch(()=>{});
       }
+      // κουμπί ξανά «Start»
+      startBtn.disabled=false;
     }
 
-    function startGame(){
-      resetGame();
-      running = true;
-      spawnOne();
-    }
+    function scheduleSpawn(delay){
+      if(!running) return;
+      const d = delay ?? rnd(...MODES[mode].spawn);
+      spawnTO = setTimeout(()=>{
+        // burst logic + cap στο max concurrent
+        const spec = MODES[mode];
+        const space = Math.max(0, spec.maxLive - live);
+        if(space<=0){ scheduleSpawn(rnd(...spec.spawn)); return; }
 
-    function endGame(){
-      running = false;
-      // εδώ στο μέλλον: auto submit στο daily leaderboard (όταν ανοίξει endpoint)
-      // submitDailyTargetRush({device:deviceId, day:todayKey(), hits, misses, mode});
+        let n=1;
+        if(Math.random() < spec.burst.p){ // burst
+          const r = Math.random();
+          n = (r < spec.burst.three) ? 3 : (r < spec.burst.two + spec.burst.three ? 2 : 1);
+          n = Math.min(n, space);
+        }
+        for(let i=0;i<n;i++) spawnOne();
+
+        // επόμενη απόπειρα spawn
+        scheduleSpawn(rnd(...spec.spawn));
+      }, d);
     }
 
     function spawnOne(){
-      if (!running) return;
-      const { w, h } = arenaBounds();
+      if(!running) return;
+      if(live >= MODES[mode].maxLive) return;
 
-      // ελαφριά τυχαιοποίηση μεγέθους γύρω απ’ το τωρινό
-      const size = Math.round(rand(50, 64));
-      const pad  = 10;
-      const x = clamp(rand(pad, w - size - pad), pad, w - size - pad);
-      const y = clamp(rand(pad, h - size - pad), pad, h - size - pad);
+      const life = rnd(...MODES[mode].lifetime);
+      const r = sizeWithin();
+      const pad = r + 6; // margin from borders
+      // θέση μέσα στην arena
+      const rect = arena.getBoundingClientRect();
+      const x = rnd(pad, rect.width - pad);
+      const y = rnd(pad, rect.height - pad);
 
-      const el = document.createElement('button');
-      el.className = 'target';
-      el.type = 'button';
-      el.style.left   = x + 'px';
-      el.style.top    = y + 'px';
-      el.style.width  = size + 'px';
-      el.style.height = size + 'px';
+      const el = document.createElement('div');
+      el.className='target';
+      el.style.width = el.style.height = r+'px';
+      el.style.left = x+'px'; el.style.top = y+'px';
+      el.style.animationDuration = life+'ms';
+      el.dataset.spawn = performance.now();
 
-      const life = MODES[mode].lifeMs;
-      el.style.animation = `tr-shrink ${life}ms linear forwards`;
+      // χειριστής click
+      let handled=false;
+      el.addEventListener('pointerdown', e=>{
+        if(handled) return;
+        handled=true;
+        const age = performance.now() - (+el.dataset.spawn);
+        if(age < MIN_TOUCH_MS) return; // guard
+        hits++; live--; el.remove(); updateHud();
+        // «άμεσος» επόμενος στόχος ως reward για speed
+        spawnOne();
+      }, {passive:true});
 
-      let handled = false;
+      // expiry = miss
+      const killTO = setTimeout(()=>{
+        if(!handled && el.isConnected){ misses++; live--; el.remove(); updateHud(); }
+      }, life+16);
 
-      const cleanup = ()=>{
-        if (el.isConnected) arenaEl.removeChild(el);
-      };
+      // ensure clear on end
+      el.addEventListener('transitionend', ()=> clearTimeout(killTO), { once:true });
 
-      const expiry = setTimeout(()=>{
-        if (!handled){
-          misses++; updateHUD(); maybeEnd();
-        }
-        cleanup();
-        if (running) spawnOne();
-      }, life);
-
-      el.addEventListener('click', ()=>{
-        if (handled) return;
-        handled = true;
-        clearTimeout(expiry);
-        hits++; updateHUD();
-        cleanup();
-        if (running) spawnOne();
-      });
-
-      arenaEl.appendChild(el);
+      arena.appendChild(el);
+      live++;
     }
 
-    function openHow(){ howModal.classList.add('open'); }
-    function closeHowFn(){ howModal.classList.remove('open'); }
+    function updateHud(){
+      hitsEl.textContent = String(hits);
+      missesEl.textContent = String(misses);
+      const a = pct(hits, hits+misses);
+      accEl.textContent = a ? a+'%' : '—';
+    }
 
+    /* ───── Modal helpers ───── */
+    const openHow = ()=>{ backdrop.classList.add('open'); modal.classList.add('open'); };
+    const closeHowFn = ()=>{ backdrop.classList.remove('open'); modal.classList.remove('open'); };
+
+    /* ───── Boot ───── */
     window.addEventListener('DOMContentLoaded', ()=>{
-      arenaEl   = document.getElementById('arena');
-      startBtn  = document.getElementById('start');
-      modeSel   = document.getElementById('mode');
-      howBtn    = document.getElementById('how');
-      howModal  = document.getElementById('how-modal');
-      closeHow  = document.getElementById('close-how');
-      hitsEl    = document.getElementById('hits');
-      missesEl  = document.getElementById('misses');
-      dailyNote = document.getElementById('trial-note');
+      arena = document.getElementById('arena');
+      timerFill = document.getElementById('timer-fill');
+      startBtn = document.getElementById('start');
+      howBtn = document.getElementById('how');
+      modeSel = document.getElementById('mode');
+      hitsEl = document.getElementById('hits');
+      missesEl = document.getElementById('misses');
+      accEl = document.getElementById('acc');
+      backdrop = document.getElementById('backdrop');
+      modal = document.getElementById('how-modal');
+      closeHow = document.getElementById('how-close');
 
-      startBtn.addEventListener('click', startGame);
-      modeSel.addEventListener('change', (e)=>{
-        mode = e.target.value;
-        resetGame();
-        // Trial note ορατό μόνο στο trial
-        dailyNote.style.display = MODES[mode].endless ? 'block' : 'none';
-      });
+      startBtn.addEventListener('click', ()=>{ startBtn.disabled=true; start(); });
+      modeSel.addEventListener('change', e=>{ mode=e.target.value; reset(); });
       howBtn.addEventListener('click', openHow);
+      backdrop.addEventListener('click', closeHowFn);
       closeHow.addEventListener('click', closeHowFn);
 
-      // initial
-      updateHUD();
-      dailyNote.style.display = 'none';
+      reset();
 
-      // Ad load
-      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-targetrush', slotKey: 'targetrush' });
+      // Ad slot
+      if (window.ChronoAds) ChronoAds.load({ targetId:'ad-targetrush', slotKey:'targetrush' });
     });
   </script>
 </head>
@@ -198,49 +222,50 @@
 
   <!-- GAME -->
   <section class="card">
-    <div class="row">
+    <div class="controls-row">
       <h1 style="margin:0">Target Rush</h1>
-      <button id="how" class="btn" type="button">How to play</button>
-      <button id="start" class="btn" type="button">Start</button>
-      <label class="small" style="margin-left:auto">Mode:</label>
-      <select id="mode" class="select" aria-label="Mode">
-        <option value="default" selected>Default</option>
-        <option value="hard">Hard</option>
-        <option value="trial">Trial</option>
+      <button id="how" class="btn" type="button" style="margin-left:auto">How to play</button>
+    </div>
+
+    <p class="lead">Hit the shrinking targets as fast as you can. <b>25s session</b>. More hits = better score.</p>
+
+    <div class="controls-row center" style="gap:12px">
+      <label class="small">Mode:</label>
+      <select id="mode" class="select">
+        <option value="easy">Easy (1x)</option>
+        <option value="default" selected>Default (1–2x)</option>
+        <option value="hard">Hard (2–3x)</option>
+        <option value="trial">Trial (endless)</option>
       </select>
+      <button id="start" class="btn" type="button">Start</button>
     </div>
 
-    <p class="lead">
-      Hit the shrinking targets as fast as you can.
-      <span id="trial-note" class="badge note">Trial mode — endless practice, no leaderboard (yet).</span>
-    </p>
-
-    <div id="arena" class="arena"></div>
-
-    <div class="hud">
-      <div class="stat">
-        <div class="label">Hits</div>
-        <div class="value" id="hits">0</div>
-      </div>
-      <div class="stat">
-        <div class="label">Misses</div>
-        <div class="value" id="misses">0</div>
-      </div>
+    <!-- 25s Timer -->
+    <div class="timer-wrap" aria-label="Session timer">
+      <div id="timer-fill" class="timer-fill"></div>
     </div>
 
-    <p class="small" style="margin-top:10px">No decimals. Anti-cheat will apply globally.</p>
+    <div id="arena" class="arena" aria-label="Target arena"></div>
+
+    <div class="stats compact" style="margin-top:12px">
+      <div class="stat"><div class="label">Hits</div><div class="value" id="hits">0</div></div>
+      <div class="stat"><div class="label">Misses</div><div class="value" id="misses">0</div></div>
+      <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">—</div></div>
+    </div>
   </section>
 
   <!-- How to play modal -->
-  <section id="how-modal" class="modal card" role="dialog" aria-modal="true" aria-labelledby="how-title">
-    <div class="row">
+  <div id="backdrop" class="backdrop"></div>
+  <section id="how-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="how-title">
+    <div class="controls-row">
       <h2 id="how-title" style="margin:0">How to play</h2>
-      <button id="close-how" class="btn" type="button" style="margin-left:auto">Close</button>
+      <button id="how-close" class="btn" type="button" style="margin-left:auto">Got it</button>
     </div>
     <ul>
-      <li>Tap the red-ring target before it disappears.</li>
-      <li>Targets slightly shrink as time passes — act fast.</li>
-      <li>Non-trial ends after 2 misses. Trial is endless practice.</li>
+      <li>Tap inside the <b>red circle</b> before it shrinks away.</li>
+      <li>Each run lasts <b>25 seconds</b>. Faster taps spawn new targets sooner.</li>
+      <li><b>Hard</b> throws <b>2–3 simultaneous</b> targets regularly. Be sharp!</li>
+      <li><b>Trial</b> mode: practice freely; we still count misses, no submit/leaderboard.</li>
     </ul>
   </section>
 </main>
