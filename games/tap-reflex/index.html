@@ -10,20 +10,44 @@
   <script src="../../assets/ga-loader.js"></script>
   <script src="../../assets/ads-loader.js"></script>
 
+  <!-- Mobile compact tweaks (χωρίς να πειράξουμε global CSS) -->
+  <style>
+    /* Κάνε τα πάνελ πιο μικρά για να χωράει ad πάνω + game κάτω */
+    .ad-top { margin-top: 8px; }
+    .tap-area.compact {
+      font-size: 18px;
+      padding: 18px;
+      min-height: 120px;
+      border-radius: 14px;
+    }
+    .stats.compact .label { font-size: 10px; }
+    .stats.compact .value { font-size: 16px; }
+    @media (min-width: 480px) {
+      .tap-area.compact { min-height: 140px; font-size: 20px; }
+      .stats.compact .value { font-size: 18px; }
+    }
+  </style>
+
   <script type="module">
     import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
     const MIN_HUMAN_MS = 60;
-    const MODES = { easy:{label:"Easy",range:[1500,2700]}, default:{label:"Default",range:[1200,2400]}, hard:{label:"Hard",range:[900,1800]} };
+    // + Trial (endless): ίδια ροή, χωρίς submit/leaderboard
+    const MODES = {
+      easy:    { label: "Easy",    range: [1500, 2700], endless: false },
+      default: { label: "Default", range: [1200, 2400], endless: false },
+      hard:    { label: "Hard",    range: [ 900, 1800], endless: false },
+      trial:   { label: "Trial (endless)", range: [1200, 2400], endless: true }
+    };
     const DAILY_LIMIT = 5, SUBMIT_MIN_ATTEMPTS = 5;
 
     let state="idle", startTs=0; let sum=0, attempts=0, bestSingle=null; let waitTimer=null; let mode="default";
     const deviceId = getDeviceId();
 
-    let tapEl,lastEl,avgEl,bestEl,hiEl,attemptsEl,resetBtn,modeSel,submitBtn,leaderWrap,dailyCounterEl;
+    let tapEl,lastEl,avgEl,bestEl,hiEl,attemptsEl,resetBtn,modeSel,submitBtn,leaderWrap,dailyCounterEl,noticeEl;
 
     const vibrate=(ms)=>{ try{ if(navigator.vibrate) navigator.vibrate(ms);}catch(_){} };
     const rnd=(a,b)=>Math.floor(a+Math.random()*(b-a+1));
-    const setState=(s,text,cls)=>{ state=s; tapEl.className=`tap-area ${cls||""}`.trim(); tapEl.textContent=text; };
+    const setState=(s,text,cls)=>{ state=s; tapEl.className=`tap-area compact ${cls||""}`.trim(); tapEl.textContent=text; };
     const render=()=>{
       lastEl.textContent = window._last==null ? "—" : Math.round(window._last);
       avgEl.textContent  = attempts? Math.round(sum/attempts) : "—";
@@ -46,6 +70,15 @@
     };
 
     async function refreshDaily(){
+      // Trial mode: χωρίς daily/submit/leaderboard
+      if (MODES[mode].endless) {
+        dailyCounterEl.textContent = "—";
+        submitBtn.disabled = true;
+        noticeEl.style.display = "block";
+        leaderWrap.innerHTML = `<div class="notice">Trial mode: endless practice — no leaderboard.</div>`;
+        return;
+      }
+      noticeEl.style.display = "none";
       try{
         const j = await fetchJSON(`/api/daily?device=${encodeURIComponent(deviceId)}&day=${todayKey()}`);
         dailyCounterEl.textContent = `${j.used}/${DAILY_LIMIT}`;
@@ -56,6 +89,7 @@
       }
     }
     async function submitDaily(){
+      if (MODES[mode].endless) return;
       if(attempts<SUBMIT_MIN_ATTEMPTS) return;
       const avg=Math.round(sum/attempts), best=Math.round(bestSingle||0);
       try{
@@ -64,6 +98,7 @@
       }catch(e){ alert(e.data?.error||e.message||"Submit failed"); }
     }
     async function loadLeaderboard(){
+      if (MODES[mode].endless) return; // Trial: no leaderboard
       try{
         const j = await fetchJSON(`/api/leaderboard?range=daily&day=${todayKey()}&limit=20`);
         leaderWrap.innerHTML = renderTable(j.items||[]);
@@ -79,17 +114,17 @@
       tapEl=document.getElementById("tap"); lastEl=document.getElementById("last"); avgEl=document.getElementById("avg");
       bestEl=document.getElementById("best"); hiEl=document.getElementById("hi"); attemptsEl=document.getElementById("attempts");
       resetBtn=document.getElementById("reset"); modeSel=document.getElementById("mode"); submitBtn=document.getElementById("submit");
-      leaderWrap=document.getElementById("leader"); dailyCounterEl=document.getElementById("daily-counter");
+      leaderWrap=document.getElementById("leader"); dailyCounterEl=document.getElementById("daily-counter"); noticeEl=document.getElementById("trial-note");
 
       tapEl.addEventListener("click", onTap);
       tapEl.addEventListener("keydown",(e)=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); onTap(); }});
       resetBtn.addEventListener("click", ()=>{ resetSession(); refreshDaily(); });
-      modeSel.addEventListener("change",(e)=>{ mode=e.target.value; resetSession(); });
+      modeSel.addEventListener("change", async (e)=>{ mode=e.target.value; resetSession(); await refreshDaily(); await loadLeaderboard(); });
 
       resetSession(); await refreshDaily(); await loadLeaderboard();
       submitBtn.addEventListener("click", submitDaily);
 
-      // Inject the ad slot under stats
+      // Φόρτωσε τη διαφήμιση (πάνω)
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-tapreflex', slotKey: 'tapreflex' });
     });
   </script>
@@ -100,9 +135,17 @@
 </header>
 
 <main class="container">
+
+  <!-- TOP AD (tapreflex) -->
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <div id="ad-tapreflex" class="placeholder-ad"></div>
+  </section>
+
+  <!-- GAME -->
   <section class="card">
     <div class="row"><h1 style="margin:0">Tap Reflex</h1><span class="badge">DAILY CHALLENGE</span></div>
-    <p class="lead">Wait until the panel turns green, then tap. Choose mode and submit your <b>Daily Challenge</b> (best average wins).</p>
+    <p class="lead">Wait until the panel turns green, then tap. Choose mode. <b>Trial</b> is endless practice (no leaderboard).</p>
 
     <div class="row" style="margin-bottom:8px">
       <label class="small">Mode:</label>
@@ -110,19 +153,22 @@
         <option value="easy">Easy (1.5–2.7s)</option>
         <option value="default" selected>Default (1.2–2.4s)</option>
         <option value="hard">Hard (0.9–1.8s)</option>
+        <option value="trial">Trial (endless)</option>
       </select>
       <span class="small">Daily submissions used: <b id="daily-counter">—/5</b></span>
     </div>
 
-    <div id="tap" class="tap-area ready" tabindex="0" role="button" aria-label="Tap when it turns green">Tap to start</div>
+    <div id="tap" class="tap-area compact ready" tabindex="0" role="button" aria-label="Tap when it turns green">Tap to start</div>
 
-    <div class="stats">
+    <div class="stats compact">
       <div class="stat"><div class="label">Last (ms)</div><div class="value" id="last">—</div></div>
       <div class="stat"><div class="label">Average (ms)</div><div class="value" id="avg">—</div></div>
       <div class="stat"><div class="label">Attempts</div><div class="value" id="attempts">0</div></div>
       <div class="stat"><div class="label">Best single (ms)</div><div class="value" id="best">—</div></div>
       <div class="stat"><div class="label">Hi-score (avg)</div><div class="value" id="hi">—</div></div>
     </div>
+
+    <div id="trial-note" class="small" style="display:none; margin-top:6px;">Trial mode: endless practice — Submit/Leaderboard disabled.</div>
 
     <div class="row" style="margin-top:10px">
       <button id="reset" class="btn" type="button">Reset session</button>
@@ -131,12 +177,6 @@
 
     <div id="leader" style="margin-top:12px"></div>
     <p class="small">Anti-cheat: reactions &lt; 60ms ignored. No decimals. Anonymous device ID.</p>
-  </section>
-
-  <!-- Ad container under the game stats (dynamic via ChronoAds) -->
-  <section class="card">
-    <h2>Ad</h2>
-    <div id="ad-tapreflex" class="placeholder-ad"></div>
   </section>
 </main>
 
