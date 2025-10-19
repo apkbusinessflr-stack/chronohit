@@ -1,86 +1,47 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sequence Sprint — ChronoHit</title>
-  <meta name="description" content="Memorize and repeat the light sequence. Endless trial mode." />
-  <meta name="theme-color" content="#FF3B3B" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
-  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
-  <link rel="stylesheet" href="/assets/chronohit.css" />
-  <script src="/assets/ga-loader.js"></script>
-  <script src="/assets/ads-loader.js"></script>
-  <style>
-    .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; margin-top:10px; }
-    .pad { height:120px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:20px; background:#121822; border:1px solid var(--border); cursor:pointer; user-select:none; transition: transform .06s ease; }
-    .pad:active { transform: scale(.98); }
-    .pad.on { outline: 2px solid #FF3B3B; box-shadow: 0 0 0 3px rgba(255,59,59,.25) inset; }
-    @media (min-width: 480px) { .pad { height:140px; font-size:22px; } }
-    .hud { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-    .hud .stat { flex:1 1 160px; background:#0d1218; border:1px solid var(--border); border-radius:12px; padding:10px; }
-    .hud .label{ color:var(--muted); font-size:12px; }
-    .hud .value{ font-weight:900; font-size:22px; }
-    .controls { display:flex; gap:10px; margin-top:10px; }
-  </style>
-
-  <script type="module">
-    import { ls } from "/assets/utils.js";
-    const PADS=4, FLASH_MS=600, GAP_MS=180, INPUT_GUARD_MS=120;
-    let seq=[], pos=0, accepting=false, pads=[], lastFlashEnd=0, longest=ls.get('ss.hi',0), mistakes=0;
-    function rnd(n){ return Math.floor(Math.random()*n); }
-    function renderHUD(){ len.textContent=seq.length; longestEl.textContent=longest; mistakesEl.textContent=mistakes; }
-    function resetSession(){ seq=[]; pos=0; mistakes=0; accepting=false; renderHUD(); }
-    async function flashPad(i){ const el=pads[i]; if(!el) return; el.classList.add('on'); await new Promise(r=>setTimeout(r,FLASH_MS)); el.classList.remove('on'); await new Promise(r=>setTimeout(r,GAP_MS)); lastFlashEnd=performance.now(); }
-    async function playSequence(){ accepting=false; for(let i=0;i<seq.length;i++){ await flashPad(seq[i]); } accepting=true; pos=0; }
-    async function nextRound(){ seq.push(rnd(PADS)); renderHUD(); await playSequence(); }
-    async function onPadClick(i){
-      if(!accepting) return;
-      if(performance.now()-lastFlashEnd<INPUT_GUARD_MS) return;
-      const correct=seq[pos]===i;
-      if(correct){ pos++; if(pos>=seq.length){ if(seq.length>longest){ longest=seq.length; ls.set('ss.hi',longest);} renderHUD(); setTimeout(nextRound,350); accepting=false; } }
-      else { mistakes++; renderHUD(); setTimeout(nextRound,450); seq=[]; pos=0; accepting=false; }
-    }
-    function boot(){
-      for(let i=0;i<PADS;i++){ const el=document.getElementById('pad'+i); pads[i]=el; el.addEventListener('click',()=>onPadClick(i)); }
-      renderHUD();
-      start.addEventListener('click', ()=>{ resetSession(); nextRound(); });
-      reset.addEventListener('click', resetSession);
-      if(window.ChronoAds) ChronoAds.load({ targetId:'ad-sequencesprint', slotKey:'sequencesprint' });
-    }
-    window.addEventListener('DOMContentLoaded', boot);
-  </script>
-</head>
-<body>
-<header class="header">
-  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
-</header>
-
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sequence Sprint — ChronoHit</title>
+<link rel="stylesheet" href="/assets/chronohit.css"><link rel="manifest" href="/manifest.webmanifest">
+<script src="/assets/ga-loader.js"></script><script src="/assets/ads-loader.js"></script></head>
+<body><header class="header"><a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a></header>
 <main class="container">
-  <section class="card ad-top">
-    <h2>Ad</h2>
-    <div id="ad-sequencesprint" class="placeholder-ad"></div>
-  </section>
-
-  <section class="card">
-    <h1 style="margin:0">Sequence Sprint</h1>
-    <p class="lead">Memorize and repeat the light sequence. <b>Trial</b> mode — endless practice, no leaderboard (yet).</p>
-    <div class="grid" aria-label="Sequence pads">
-      <div class="pad" id="pad0">1</div>
-      <div class="pad" id="pad1">2</div>
-      <div class="pad" id="pad2">3</div>
-      <div class="pad" id="pad3">4</div>
-    </div>
-    <div class="hud">
-      <div class="stat"><div class="label">Current length</div><div class="value" id="len">0</div></div>
-      <div class="stat"><div class="label">Longest</div><div class="value" id="longestEl">0</div></div>
-      <div class="stat"><div class="label">Mistakes</div><div class="value" id="mistakesEl">0</div></div>
-    </div>
-    <div class="controls"><button id="start" class="btn" type="button">Start</button><button id="reset" class="btn" type="button">Reset</button></div>
-  </section>
-</main>
-
-<footer class="footer">© 2025 ChronoHit</footer>
-</body>
-</html>
+<section class="card ad-top"><h2>Ad</h2><div id="ad-sequencesprint" class="placeholder-ad"></div></section>
+<section class="card"><div class="row"><h1 style="margin:0">Sequence Sprint</h1><span class="badge">DAILY CHALLENGE</span></div>
+<p class="lead">Watch the pads light up, then repeat the sequence. No numbers — just pure focus.</p>
+<div class="row" style="margin-bottom:8px"><label class="small">Mode:</label>
+<select id="mode" class="select" aria-label="Mode"><option value="easy">Easy (3×3)</option><option value="default" selected>Default (3×4)</option><option value="hard">Hard (4×4)</option><option value="trial">Trial (endless)</option></select>
+<button class="btn" id="start" type="button">Start</button>
+<button class="btn" id="howto-open" type="button" aria-haspopup="dialog">How to play</button>
+<span class="small">Daily submissions used: <b id="daily-counter">—/5</b></span></div>
+<div class="grid grid-3x4" id="grid" aria-label="Pads grid"></div>
+<div class="stats"><div class="stat"><div class="label">Current length</div><div class="value" id="len">0</div></div>
+<div class="stat"><div class="label">Hi‑score (longest)</div><div class="value" id="best">0</div></div>
+<div class="stat"><div class="label">Mistakes</div><div class="value" id="mist">0</div></div></div>
+<div class="row" style="margin-top:10px"><button id="submit" class="btn" type="button" disabled>Submit to Daily Leaderboard</button></div>
+<div id="leader" style="margin-top:12px"></div><p class="small">Anti-cheat: fast inputs are ignored. Anonymous device ID.</p></section></main>
+<div id="howto-backdrop" class="modal-backdrop" style="display:none"><div class="modal"><h3 id="howto-title">How to play</h3>
+<ul><li>Watch the pads light up — remember the order.</li><li>Tap the same pads in sequence. Each round adds one more.</li><li>Modes change grid size and speed. Trial is endless practice.</li></ul>
+<div class="actions"><button class="btn" id="howto-close" type="button">Got it</button></div></div></div>
+<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+<script type="module">
+import { ls, getDeviceId, todayKey, fetchJSON, haptics, gaEvent } from '/assets/utils.js';
+const MODES={easy:{label:'Easy (3×3)',size:[3,3],flash:520,gap:160}, default:{label:'Default (3×4)',size:[3,4],flash:480,gap:140}, hard:{label:'Hard (4×4)',size:[4,4],flash:440,gap:120}, trial:{label:'Trial (endless)',size:[3,4],flash:480,gap:140,endless:true}};
+const DAILY_LIMIT=5; const deviceId=getDeviceId(); let mode='default',sequence=[],index=0,accepting=false,longest=0,mistakes=0,playing=false;
+let gridEl,startBtn,modeSel,submitBtn,infoLen,infoBest,infoMist,dailyCounterEl,leaderWrap;
+function randInt(n){return Math.floor(Math.random()*n)} function gridCount(){const [w,h]=MODES[mode].size;return w*h}
+function renderGrid(){const [w,h]=MODES[mode].size;const n=w*h;gridEl.className=`grid ${(w===3&&h===3)?'grid-3x3':(w===3&&h===4)?'grid-3x4':'grid-4x4'}`;gridEl.innerHTML='';for(let i=0;i<n;i++){const d=document.createElement('button');d.className='pad';d.type='button';d.setAttribute('aria-label',`pad ${i+1}`);d.addEventListener('click',()=>onPad(i));gridEl.appendChild(d)}}
+function renderStats(){infoLen.textContent=index;infoMist.textContent=mistakes;const hi=ls.get('ss.hi',0);infoBest.textContent=Math.max(hi,longest)}
+function flashPad(i,t){const el=gridEl.children[i];if(!el)return;el.classList.add('on');haptics.vibrate(20);setTimeout(()=>el.classList.remove('on'),t)}
+async function playback(){playing=true;accepting=false;const {flash,gap}=MODES[mode];const speedAdj=Math.max(0,sequence.length*3);for(let i=0;i<sequence.length;i++){flashPad(sequence[i],flash-speedAdj);await wait(flash-speedAdj);await wait(gap)}accepting=true;playing=false;gaEvent('ss_playback_done',{len:sequence.length,mode})}
+function nextRound(){sequence.push(randInt(gridCount()));index=0;playback()}
+async function onPad(i){if(!accepting||playing)return;const expected=sequence[index];if(i===expected){index++;flashPad(i,120);gaEvent('ss_step_ok',{step:index,len:sequence.length,mode});if(index===sequence.length){longest=Math.max(longest,sequence.length);const prev=ls.get('ss.hi',0);if(longest>prev)ls.set('ss.hi',longest);renderStats();await wait(420);nextRound()}}else{mistakes++;gaEvent('ss_fail',{step:index+1,len:sequence.length,mode});accepting=false;if(MODES[mode].endless){index=0;setTimeout(()=>{accepting=true},300)}else{alert('Oops! Wrong pad. Run over.')}renderStats()}}
+function wait(ms){return new Promise(r=>setTimeout(r,ms))} async function startGame(){resetSession();sequence=[randInt(gridCount())];await playback()}
+function resetSession(){sequence=[];index=0;accepting=false;playing=false;mistakes=0;longest=0;ls.set('ss.last',{longest,mistakes});renderStats()}
+async function refreshDaily(){if(MODES[mode].endless){dailyCounterEl.textContent='∞';submitBtn.disabled=true;leaderWrap.innerHTML=`<div class="notice">Trial mode: endless practice — no leaderboard.</div>`;return}
+try{const j=await fetchJSON(`/api/daily?game=ss&device=${encodeURIComponent(deviceId)}&day=${todayKey()}`);dailyCounterEl.textContent=`${j.used}/${DAILY_LIMIT}`;submitBtn.disabled=(j.used>=DAILY_LIMIT)||longest<=0}catch(e){dailyCounterEl.textContent=`—/${DAILY_LIMIT}`;submitBtn.disabled=longest<=0}}
+async function submitDaily(){if(MODES[mode].endless)return;try{const r=await fetchJSON('/api/score',{method:'POST',body:JSON.stringify({game:'ss',device:deviceId,day:todayKey(),longest,mistakes,mode})});await refreshDaily();await loadLeaderboard();alert(r.message||'Submitted!');gaEvent('ss_submit',{longest,mistakes,mode})}catch(e){alert(e.data?.error||e.message||'Submit failed')}}
+async function loadLeaderboard(){if(MODES[mode].endless)return;try{const j=await fetchJSON(`/api/leaderboard?game=ss&range=daily&day=${todayKey()}&limit=20`);leaderWrap.innerHTML=renderTable(j.items||[])}catch(e){leaderWrap.innerHTML=`<div class="notice">Leaderboard unavailable.</div>`}}
+function renderTable(items){if(!items.length)return `<div class="notice">No scores yet today. Be the first!</div>`;const rows=items.map((it,idx)=>`<tr><td>${idx+1}</td><td>${it.longest}</td><td>${it.mistakes}</td><td>${it.mode||'default'}</td></tr>`).join('');return `<table class="table"><thead><tr><th>#</th><th>Longest</th><th>Mistakes</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`}
+function openHowTo(){document.getElementById('howto-backdrop').style.display='flex'} function closeHowTo(){document.getElementById('howto-backdrop').style.display='none'}
+window.addEventListener('DOMContentLoaded',async()=>{gridEl=document.getElementById('grid');startBtn=document.getElementById('start');modeSel=document.getElementById('mode');submitBtn=document.getElementById('submit');infoLen=document.getElementById('len');infoBest=document.getElementById('best');infoMist=document.getElementById('mist');dailyCounterEl=document.getElementById('daily-counter');leaderWrap=document.getElementById('leader');document.getElementById('howto-open').addEventListener('click',openHowTo);document.getElementById('howto-close').addEventListener('click',closeHowTo);
+renderGrid();resetSession();await refreshDaily();await loadLeaderboard();startBtn.addEventListener('click',startGame);modeSel.addEventListener('change',async(e)=>{mode=e.target.value;renderGrid();resetSession();await refreshDaily();await loadLeaderboard();gaEvent('ss_mode_change',{mode})});
+if(window.ChronoAds) ChronoAds.load({targetId:'ad-sequencesprint',slotKey:'sequencesprint'});});</script></body></html>
