@@ -9,6 +9,9 @@ export const ls = {
   set: (k, v) => {
     try { localStorage.setItem(k, JSON.stringify(v)); }
     catch {}
+  },
+  remove: (k) => {
+    try { localStorage.removeItem(k); } catch {}
   }
 };
 
@@ -46,7 +49,11 @@ export function todayKey() {
 
 // Small fetch helper with JSON parse + error bubble
 export async function fetchJSON(url, opts) {
-  const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const r = await fetch(url, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     const err = new Error(data?.error || `HTTP ${r.status}`);
