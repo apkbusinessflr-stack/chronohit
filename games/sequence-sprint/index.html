@@ -6,14 +6,17 @@
   <title>Sequence Sprint — ChronoHit</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
 
-  <!-- Make the game UI ~50% smaller & tidy visuals -->
+  <!-- Μικρές αισθητικές + layout διορθώσεις: κέντρο & λίγο μεγαλύτερο -->
   <style>
-    .wrap { display:flex; flex-direction:column; gap:12px; }
-    .grid { display:grid; gap:8px; margin:8px 0; }
-    /* Half-sized max widths per layout */
-    .grid.grid-3x3  { grid-template-columns: repeat(3, 1fr); max-width: 200px; width:100%; }
-    .grid.grid-3x4  { grid-template-columns: repeat(3, 1fr); max-width: 230px; width:100%; }
-    .grid.grid-4x4  { grid-template-columns: repeat(4, 1fr); max-width: 260px; width:100%; }
+    .stage { display:flex; justify-content:center; }
+    .panel { width:100%; max-width:720px; margin:0 auto; }
+    .wrap { display:flex; flex-direction:column; gap:12px; align-items:center; }
+
+    /* λίγο μεγαλύτερο από πριν (+15% περίπου) και πάντα centered */
+    .grid { display:grid; gap:10px; margin:8px 0; justify-content:center; }
+    .grid.grid-3x3  { grid-template-columns: repeat(3, 1fr); max-width: 230px; width:100%; }
+    .grid.grid-3x4  { grid-template-columns: repeat(3, 1fr); max-width: 265px; width:100%; }
+    .grid.grid-4x4  { grid-template-columns: repeat(4, 1fr); max-width: 300px; width:100%; }
 
     .pad {
       aspect-ratio: 1/1;
@@ -25,20 +28,20 @@
     }
     .pad:active { transform: scale(.98); }
 
-    /* Playback flash (game shows the sequence) */
+    /* playback flash (δείχνουμε τη σειρά) */
     .pad.show {
       background: #1a2b3d;
       box-shadow: 0 0 10px rgba(255,255,255,.12), inset 0 0 0 2px rgba(255,255,255,.08);
     }
 
-    /* Wrong tap quick flash (we remove it immediately after) */
+    /* λάθος tap – στιγμιαίο flash, δεν μένει αναμμένο */
     .pad.bad {
       background: #3b1e1e;
       box-shadow: 0 0 10px rgba(255,59,59,.25);
     }
 
-    .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-    .small { color: var(--muted); font-size: 12px; }
+    .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center }
+    .small { color: var(--muted); font-size: 12px; text-align:center }
 
     dialog.how { max-width:480px; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); }
     dialog.how::backdrop { background: rgba(0,0,0,.45); }
@@ -51,7 +54,7 @@
   <script type="module">
     import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
 
-    // Modes: grid sizes (half-sized UI via CSS above)
+    // Διαστάσεις grid ανά δυσκολία
     const MODES = {
       easy:   { label: "Easy 3×3",   rows: 3, cols: 3 },
       medium: { label: "Medium 3×4", rows: 4, cols: 3 },
@@ -59,19 +62,20 @@
       trial:  { label: "Trial (endless)", rows: 4, cols: 4, endless: true }
     };
 
-    // Playback timing (slightly faster because smaller UI)
+    // Χρονισμοί playback
     const MIN_SHOW = 240, SHOW_DECAY = 10, MIN_GAP = 70;
     const DAILY_LIMIT = 5;
-    const device = getDeviceId();
+    const AUTO_SUBMIT_MISTAKES = 2;
 
+    const device = getDeviceId();
     let mode = 'easy';
     let sequence = [];
     let inputIdx = 0;
-    let locked = false;       // true while playing back sequence
-    let running = false;      // true after "Start" pressed
+    let locked = false;       // playback lock
+    let running = false;      // ξεκινάει μόνο με Start
     let longest = 0, current = 0, mistakes = 0, speed = 0;
 
-    let gridEl, infoEl, longestEl, mistakesEl, submitBtn, dailyEl, leaderEl, startBtn, modeSel;
+    let gridEl, infoEl, longestEl, dailyEl, leaderEl, startBtn, modeSel;
 
     function rng(n){ return Math.floor(Math.random()*n); }
     function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
@@ -104,14 +108,8 @@
       mistakes = 0;
       speed = 0;
       running = false;
-      renderStats();
       infoEl.textContent = 'Press Start';
-      submitBtn.disabled = true;
-    }
-
-    function renderStats(){
       longestEl.textContent = String(longest);
-      mistakesEl.textContent = String(mistakes);
     }
 
     async function showSequence(){
@@ -136,29 +134,20 @@
     }
 
     async function onPad(e){
-      // Ignore taps if game hasn't started
       if (!running || locked) return;
-
       const el = e.currentTarget;
       const idx = Number(el.dataset.idx);
       const expected = sequence[inputIdx];
 
-      // Requirement: when tapping, pad should NOT stay lit.
-      // We won't add any "ok" class; only wrong taps flash briefly with 'bad'.
       if (idx === expected){
         inputIdx++;
         if (inputIdx === sequence.length){
-          // Round complete
           current++;
           longest = Math.max(longest, current);
           const prev = ls.get('ss.hi', 0);
           if (longest > prev) ls.set('ss.hi', longest);
-          renderStats();
-          if (!MODES[mode].endless && sequence.length >= 100) {
-            infoEl.textContent = 'Max round reached.';
-            submitBtn.disabled = false;
-            return;
-          }
+          longestEl.textContent = String(longest);
+
           inputIdx = 0;
           extendSequence();
           infoEl.textContent = 'Watch…';
@@ -166,12 +155,27 @@
           await showSequence();
         }
       } else {
-        // Wrong → quick red flash; never stays on
+        // στιγμιαίο flash για λάθος
         el.classList.add('bad');
         setTimeout(()=>el.classList.remove('bad'), 120);
         mistakes++;
-        renderStats();
-        // Reset to new round
+
+        if (!MODES[mode].endless && mistakes >= AUTO_SUBMIT_MISTAKES){
+          // Auto-submit και reset γύρου
+          try{
+            await submitScore();  // αγνοούμε τυχόν σφάλμα σιωπηλά
+          }catch(_){}
+          // Νέος γύρος μετά το auto-submit
+          inputIdx = 0; current = 0; sequence = [];
+          mistakes = 0;
+          infoEl.textContent = 'New round';
+          extendSequence();
+          await delay(320);
+          await showSequence();
+          return;
+        }
+
+        // απλό reset αν δεν έχουμε πιάσει το όριο για auto-submit
         inputIdx = 0; current = 0; sequence = [];
         infoEl.textContent = 'Oops! New round.';
         extendSequence();
@@ -187,28 +191,21 @@
       inputIdx = 0;
       current = 0;
       mistakes = 0;
-      speed = 0;
-      renderStats();
       infoEl.textContent = 'Watch the sequence…';
       extendSequence();
       await delay(300);
       await showSequence();
-      // Enable submit if not Trial (score becomes valid after first repeat)
-      if (!MODES[mode].endless) submitBtn.disabled = false;
     }
 
     async function refreshDaily(){
       if (MODES[mode].endless){
         dailyEl.textContent = '∞';
-        submitBtn.disabled = true;
         leaderEl.innerHTML = `<div class="notice">Trial mode: endless practice — no leaderboard.</div>`;
         return;
       }
       try{
-        const j = await fetchJSON(`/api/daily?game=ss&device=${encodeURIComponent(getDeviceId())}&day=${todayKey()}`);
+        const j = await fetchJSON(`/api/daily?device=${encodeURIComponent(device)}&day=${todayKey()}`);
         dailyEl.textContent = `${j.used}/${DAILY_LIMIT}`;
-        // Submit remains enabled while running; but disallow if daily limit reached
-        if (j.used >= DAILY_LIMIT) submitBtn.disabled = true;
       }catch{
         dailyEl.textContent = `—/${DAILY_LIMIT}`;
       }
@@ -216,24 +213,19 @@
 
     async function submitScore(){
       if (MODES[mode].endless) return;
-      try{
-        const r = await fetchJSON('/api/score', {
-          method:'POST',
-          body: JSON.stringify({
-            game:'ss',
-            device: getDeviceId(),
-            day: todayKey(),
-            best: longest,         // longest streak = primary metric
-            attempts: mistakes,    // mistakes as secondary
-            mode
-          })
-        });
-        alert(r.message || 'Submitted!');
-        await refreshDaily();
-        await loadLeaderboard();
-      }catch(e){
-        alert(e.data?.error || e.message || 'Submit failed');
-      }
+      // Χρησιμοποιούμε το longest ως κύριο metric (best)
+      const payload = {
+        game: 'ss',
+        device,
+        day: todayKey(),
+        best: longest,
+        attempts: mistakes,
+        mode
+      };
+      const r = await fetchJSON('/api/score', { method:'POST', body: JSON.stringify(payload) });
+      await refreshDaily();
+      await loadLeaderboard();
+      return r;
     }
 
     async function loadLeaderboard(){
@@ -248,30 +240,24 @@
 
     function renderTable(items){
       if(!items.length) return `<div class="notice">No scores yet today. Be the first!</div>`;
-      const rows = items.map((it, i)=>`<tr><td>${i+1}</td><td>${it.longest}</td><td>${it.mistakes}</td><td>${it.mode||'default'}</td></tr>`).join('');
-      return `<table class="table"><thead><tr><th>#</th><th>Longest</th><th>Mistakes</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
+      const rows = items.map((it, i)=>`<tr><td>${i+1}</td><td>${it.longest ?? it.best}</td><td>${it.mode || 'default'}</td></tr>`).join('');
+      return `<table class="table"><thead><tr><th>#</th><th>Longest</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
     window.addEventListener('DOMContentLoaded', async ()=>{
-      // Wire elements
       gridEl     = document.getElementById('grid');
       infoEl     = document.getElementById('info');
       longestEl  = document.getElementById('longest');
-      mistakesEl = document.getElementById('mistakes');
-      submitBtn  = document.getElementById('submit');
       dailyEl    = document.getElementById('daily');
       leaderEl   = document.getElementById('leader');
       startBtn   = document.getElementById('start');
       modeSel    = document.getElementById('mode');
 
-      // Build initial grid (no auto-start)
       const { rows, cols } = MODES[mode];
       buildGrid(rows, cols);
       resetSession();
 
-      // Events
       startBtn.addEventListener('click', startGame);
-      submitBtn.addEventListener('click', submitScore);
       modeSel.addEventListener('change', async (e)=>{
         mode = e.target.value;
         const m = MODES[mode];
@@ -281,12 +267,11 @@
         await loadLeaderboard();
       });
 
-      // Ads & data
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-sequencesprint', slotKey: 'sequencesprint' });
       await refreshDaily();
       await loadLeaderboard();
 
-      // How-to modal
+      // how-to modal
       document.getElementById('how').addEventListener('click', ()=>document.getElementById('dlg-how').showModal());
       document.getElementById('close-how').addEventListener('click', ()=>document.getElementById('dlg-how').close());
     });
@@ -297,47 +282,47 @@
   <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
 </header>
 
-<main class="container">
-  <!-- TOP AD -->
-  <section class="card ad-top">
-    <h2>Ad</h2>
-    <div id="ad-sequencesprint" class="placeholder-ad"></div>
-  </section>
+<main class="container stage">
+  <div class="panel">
+    <!-- TOP AD -->
+    <section class="card ad-top">
+      <h2>Ad</h2>
+      <div id="ad-sequencesprint" class="placeholder-ad"></div>
+    </section>
 
-  <!-- GAME -->
-  <section class="card">
-    <div class="bar">
-      <h1 style="margin:0">Sequence Sprint</h1>
-      <button id="how" class="btn" type="button">How to play</button>
-      <button id="start" class="btn" type="button">Start</button>
-      <span class="small">Daily: <b id="daily">—/5</b></span>
-      <span class="small">Mode:</span>
-      <select id="mode" class="select">
-        <option value="easy" selected>Easy (3×3)</option>
-        <option value="medium">Medium (3×4)</option>
-        <option value="hard">Hard (4×4)</option>
-        <option value="trial">Trial (endless)</option>
-      </select>
-    </div>
-
-    <p id="info" class="lead">Press Start</p>
-
-    <div class="wrap">
-      <div id="grid" class="grid grid-3x3" aria-label="Pads grid"></div>
-
-      <div class="stats">
-        <div class="stat"><div class="label">Longest</div><div class="value" id="longest">0</div></div>
-        <div class="stat"><div class="label">Mistakes</div><div class="value" id="mistakes">0</div></div>
+    <!-- GAME -->
+    <section class="card">
+      <div class="bar">
+        <h1 style="margin:0">Sequence Sprint</h1>
+        <button id="how" class="btn" type="button">How to play</button>
+        <button id="start" class="btn" type="button">Start</button>
+        <span class="small">Daily: <b id="daily">—/5</b></span>
+        <span class="small">Mode:</span>
+        <select id="mode" class="select">
+          <option value="easy" selected>Easy (3×3)</option>
+          <option value="medium">Medium (3×4)</option>
+          <option value="hard">Hard (4×4)</option>
+          <option value="trial">Trial (endless)</option>
+        </select>
       </div>
 
-      <div class="row" style="margin-top:10px">
-        <button id="submit" class="btn" type="button" disabled>Submit to Daily Leaderboard</button>
-      </div>
+      <p id="info" class="lead" style="text-align:center">Press Start</p>
 
-      <div id="leader" style="margin-top:12px"></div>
-      <p class="small">No numbers on pads. Playback lights show the sequence. Your taps never remain lit.</p>
-    </div>
-  </section>
+      <div class="wrap">
+        <div id="grid" class="grid grid-3x3" aria-label="Pads grid"></div>
+
+        <div class="stats" style="max-width:360px">
+          <div class="stat" style="flex:1 1 160px">
+            <div class="label">Longest</div>
+            <div class="value" id="longest">0</div>
+          </div>
+        </div>
+
+        <div id="leader" style="margin-top:12px; width:100%"></div>
+        <p class="small">No numbers on pads. Playback lights show the sequence. Taps never stay lit.</p>
+      </div>
+    </section>
+  </div>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
