@@ -4,12 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ChronoHit — Tap Reflex</title>
+  <meta name="description" content="Millisecond reaction games. Tap Reflex daily challenge and endless practice." />
+  <meta name="theme-color" content="#FF3B3B" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+
   <link rel="stylesheet" href="/assets/chronohit.css" />
-
-  <!-- Dynamic GA4 (reads GA_MEASUREMENT_ID via /api/ga-config) -->
   <script src="/assets/ga-loader.js"></script>
-
-  <!-- Dynamic AdSense (reads ADSENSE_* via /api/ads-config) -->
   <script src="/assets/ads-loader.js"></script>
 </head>
 <body>
@@ -22,24 +24,19 @@
 </header>
 
 <main class="container">
-  <!-- TOP AD (home) -->
   <section class="card ad-top">
     <h2>Ad</h2>
-    <!-- CLS-safe placeholder; ChronoAds will inject the responsive ad slot (home) -->
     <div id="ad-home" class="placeholder-ad"></div>
   </section>
-
-  <!-- Hero -->
   <section class="card">
     <h1>Tap Reflex</h1>
     <p class="lead">Ultra-simple reaction test. Tap when the panel turns green.</p>
-    <a class="btn" href="./games/tap-reflex/">Play now →</a>
+    <a class="btn" href="/games/tap-reflex/">Play now →</a>
   </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
 
-<!-- Trigger dynamic ad load (call after consent if using CMP) -->
 <script>
   window.ChronoAds && ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
 </script>

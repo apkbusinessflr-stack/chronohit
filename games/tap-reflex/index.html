@@ -4,22 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tap Reflex — ChronoHit</title>
-  <link rel="stylesheet" href="/assets/chronohit.css" />
+  <meta name="description" content="Tap when it turns green. Daily challenge and endless trial mode." />
+  <meta name="theme-color" content="#FF3B3B" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
 
-  <!-- Dynamic loaders -->
+  <link rel="stylesheet" href="/assets/chronohit.css" />
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
 
-  <!-- Mobile compact tweaks (χωρίς να πειράξουμε global CSS) -->
   <style>
-    /* Κάνε τα πάνελ πιο μικρά για να χωράει ad πάνω + game κάτω */
     .ad-top { margin-top: 8px; }
-    .tap-area.compact {
-      font-size: 18px;
-      padding: 18px;
-      min-height: 120px;
-      border-radius: 14px;
-    }
+    .tap-area.compact { font-size: 18px; padding: 18px; min-height: 120px; border-radius: 14px; }
     .stats.compact .label { font-size: 10px; }
     .stats.compact .value { font-size: 16px; }
     @media (min-width: 480px) {
@@ -31,7 +28,6 @@
   <script type="module">
     import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
     const MIN_HUMAN_MS = 60;
-    // + Trial (endless): ίδια ροή, χωρίς submit/leaderboard
     const MODES = {
       easy:    { label: "Easy",    range: [1500, 2700], endless: false },
       default: { label: "Default", range: [1200, 2400], endless: false },
@@ -51,7 +47,7 @@
     const render=()=>{
       lastEl.textContent = window._last==null ? "—" : Math.round(window._last);
       avgEl.textContent  = attempts? Math.round(sum/attempts) : "—";
-      attemptsEl.textContent = attempts;
+      attemptsEl.textContent = MODES[mode].endless ? "∞" : attempts;
       bestEl.textContent = bestSingle!=null? Math.round(bestSingle) : "—";
       const hi = ls.get("tap.hiAvg", null);
       hiEl.textContent = hi!=null? Math.round(hi) : "—";
@@ -70,7 +66,6 @@
     };
 
     async function refreshDaily(){
-      // Trial mode: χωρίς daily/submit/leaderboard
       if (MODES[mode].endless) {
         dailyCounterEl.textContent = "—";
         submitBtn.disabled = true;
@@ -98,7 +93,7 @@
       }catch(e){ alert(e.data?.error||e.message||"Submit failed"); }
     }
     async function loadLeaderboard(){
-      if (MODES[mode].endless) return; // Trial: no leaderboard
+      if (MODES[mode].endless) return;
       try{
         const j = await fetchJSON(`/api/leaderboard?range=daily&day=${todayKey()}&limit=20`);
         leaderWrap.innerHTML = renderTable(j.items||[]);
@@ -124,27 +119,37 @@
       resetSession(); await refreshDaily(); await loadLeaderboard();
       submitBtn.addEventListener("click", submitDaily);
 
-      // Φόρτωσε τη διαφήμιση (πάνω)
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-tapreflex', slotKey: 'tapreflex' });
+
+      const howtoBtn = document.getElementById("howto-btn");
+      const howtoDlg = document.getElementById("howto-modal");
+      const howtoClose = document.getElementById("howto-close");
+      if (howtoBtn && howtoDlg) {
+        howtoBtn.addEventListener("click", () => { try{ howtoDlg.showModal(); }catch{ howtoDlg.setAttribute("open",""); } });
+      }
+      if (howtoClose && howtoDlg) {
+        howtoClose.addEventListener("click", () => { try{ howtoDlg.close(); }catch{ howtoDlg.removeAttribute("open"); } });
+      }
     });
   </script>
 </head>
 <body>
 <header class="header">
-  <a href="../../" class="logo"><img src="../../assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
 </header>
 
 <main class="container">
-
-  <!-- TOP AD (tapreflex) -->
   <section class="card ad-top">
     <h2>Ad</h2>
     <div id="ad-tapreflex" class="placeholder-ad"></div>
   </section>
 
-  <!-- GAME -->
   <section class="card">
-    <div class="row"><h1 style="margin:0">Tap Reflex</h1><span class="badge">DAILY CHALLENGE</span></div>
+    <div class="row">
+      <h1 style="margin:0">Tap Reflex</h1>
+      <span class="badge">DAILY CHALLENGE</span>
+      <button id="howto-btn" class="btn" type="button" style="margin-left:auto">How to play</button>
+    </div>
     <p class="lead">Wait until the panel turns green, then tap. Choose mode. <b>Trial</b> is endless practice (no leaderboard).</p>
 
     <div class="row" style="margin-bottom:8px">
@@ -178,6 +183,21 @@
     <div id="leader" style="margin-top:12px"></div>
     <p class="small">Anti-cheat: reactions &lt; 60ms ignored. No decimals. Anonymous device ID.</p>
   </section>
+
+  <dialog id="howto-modal" style="max-width:520px;border:0;border-radius:16px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+    <div class="card" style="margin:0">
+      <h2 style="margin-top:0">How to play</h2>
+      <ul>
+        <li>Tap when the panel turns <b>green</b>. Too early = fail.</li>
+        <li>Make at least <b>5 attempts</b> to submit to the daily board.</li>
+        <li><b>Trial</b> mode is endless practice (no scoreboard).</li>
+      </ul>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button id="howto-close" class="btn" type="button">Got it</button>
+      </div>
+    </div>
+  </dialog>
+
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
