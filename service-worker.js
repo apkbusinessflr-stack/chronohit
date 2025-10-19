@@ -1,2 +1,0 @@
-self.addEventListener('install',e=>{e.waitUntil(caches.open('ch-v1').then(c=>c.addAll(['/','/assets/chronohit.css','/manifest.webmanifest'])))});
-self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))});
