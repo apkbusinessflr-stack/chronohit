@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sequence Sprint — ChronoHit</title>
+  <meta name="description" content="Memorize and repeat the light sequence. Endless trial mode." />
+  <meta name="theme-color" content="#FF3B3B" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+  <link rel="stylesheet" href="/assets/chronohit.css" />
+  <script src="/assets/ga-loader.js"></script>
+  <script src="/assets/ads-loader.js"></script>
+  <style>
+    .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; margin-top:10px; }
+    .pad { height:120px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:20px; background:#121822; border:1px solid var(--border); cursor:pointer; user-select:none; transition: transform .06s ease; }
+    .pad:active { transform: scale(.98); }
+    .pad.on { outline: 2px solid #FF3B3B; box-shadow: 0 0 0 3px rgba(255,59,59,.25) inset; }
+    @media (min-width: 480px) { .pad { height:140px; font-size:22px; } }
+    .hud { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .hud .stat { flex:1 1 160px; background:#0d1218; border:1px solid var(--border); border-radius:12px; padding:10px; }
+    .hud .label{ color:var(--muted); font-size:12px; }
+    .hud .value{ font-weight:900; font-size:22px; }
+    .controls { display:flex; gap:10px; margin-top:10px; }
+  </style>
+
+  <script type="module">
+    import { ls } from "/assets/utils.js";
+    const PADS=4, FLASH_MS=600, GAP_MS=180, INPUT_GUARD_MS=120;
+    let seq=[], pos=0, accepting=false, pads=[], lastFlashEnd=0, longest=ls.get('ss.hi',0), mistakes=0;
+    function rnd(n){ return Math.floor(Math.random()*n); }
+    function renderHUD(){ len.textContent=seq.length; longestEl.textContent=longest; mistakesEl.textContent=mistakes; }
+    function resetSession(){ seq=[]; pos=0; mistakes=0; accepting=false; renderHUD(); }
+    async function flashPad(i){ const el=pads[i]; if(!el) return; el.classList.add('on'); await new Promise(r=>setTimeout(r,FLASH_MS)); el.classList.remove('on'); await new Promise(r=>setTimeout(r,GAP_MS)); lastFlashEnd=performance.now(); }
+    async function playSequence(){ accepting=false; for(let i=0;i<seq.length;i++){ await flashPad(seq[i]); } accepting=true; pos=0; }
+    async function nextRound(){ seq.push(rnd(PADS)); renderHUD(); await playSequence(); }
+    async function onPadClick(i){
+      if(!accepting) return;
+      if(performance.now()-lastFlashEnd<INPUT_GUARD_MS) return;
+      const correct=seq[pos]===i;
+      if(correct){ pos++; if(pos>=seq.length){ if(seq.length>longest){ longest=seq.length; ls.set('ss.hi',longest);} renderHUD(); setTimeout(nextRound,350); accepting=false; } }
+      else { mistakes++; renderHUD(); setTimeout(nextRound,450); seq=[]; pos=0; accepting=false; }
+    }
+    function boot(){
+      for(let i=0;i<PADS;i++){ const el=document.getElementById('pad'+i); pads[i]=el; el.addEventListener('click',()=>onPadClick(i)); }
+      renderHUD();
+      start.addEventListener('click', ()=>{ resetSession(); nextRound(); });
+      reset.addEventListener('click', resetSession);
+      if(window.ChronoAds) ChronoAds.load({ targetId:'ad-sequencesprint', slotKey:'sequencesprint' });
+    }
+    window.addEventListener('DOMContentLoaded', boot);
+  </script>
+</head>
+<body>
+<header class="header">
+  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+</header>
+
+<main class="container">
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <div id="ad-sequencesprint" class="placeholder-ad"></div>
+  </section>
+
+  <section class="card">
+    <h1 style="margin:0">Sequence Sprint</h1>
+    <p class="lead">Memorize and repeat the light sequence. <b>Trial</b> mode — endless practice, no leaderboard (yet).</p>
+    <div class="grid" aria-label="Sequence pads">
+      <div class="pad" id="pad0">1</div>
+      <div class="pad" id="pad1">2</div>
+      <div class="pad" id="pad2">3</div>
+      <div class="pad" id="pad3">4</div>
+    </div>
+    <div class="hud">
+      <div class="stat"><div class="label">Current length</div><div class="value" id="len">0</div></div>
+      <div class="stat"><div class="label">Longest</div><div class="value" id="longestEl">0</div></div>
+      <div class="stat"><div class="label">Mistakes</div><div class="value" id="mistakesEl">0</div></div>
+    </div>
+    <div class="controls"><button id="start" class="btn" type="button">Start</button><button id="reset" class="btn" type="button">Reset</button></div>
+  </section>
+</main>
+
+<footer class="footer">© 2025 ChronoHit</footer>
+</body>
+</html>

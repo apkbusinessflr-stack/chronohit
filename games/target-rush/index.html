@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Target Rush — ChronoHit</title>
+  <meta name="description" content="Hit shrinking targets quickly. Endless trial mode." />
+  <meta name="theme-color" content="#FF3B3B" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+  <link rel="stylesheet" href="/assets/chronohit.css" />
+  <script src="/assets/ga-loader.js"></script>
+  <script src="/assets/ads-loader.js"></script>
+  <style>
+    .arena { position: relative; width: 100%; height: 420px; background: #0e141c; border:1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .target { position: absolute; border-radius: 999px; border: 2px solid rgba(255,59,59,.9); background: rgba(255,59,59,.15); display:flex; align-items:center; justify-content:center; font-weight:900; color:#fff; }
+    .hud { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .hud .stat { flex:1 1 160px; background:#0d1218; border:1px solid var(--border); border-radius:12px; padding:10px; }
+    .hud .label{ color:var(--muted); font-size:12px; }
+    .hud .value{ font-weight:900; font-size:22px; }
+    .controls { display:flex; gap:10px; margin-top:10px; }
+  </style>
+
+  <script type="module">
+    import { ls } from "/assets/utils.js";
+    const MIN_HUMAN_MS = 60, SPAWN_EVERY_MS = 900, TARGET_LIFE_MS = 1200, MAX_CONCURRENT = 2;
+    const MIN_RADIUS = 18, MAX_RADIUS = 48;
+    let arena, stats = { hits:0, misses:0, last:null, avg:null, taps:0 }, hi = ls.get("tr.hi", 0);
+    let targets = new Map();
+    function rnd(a,b){ return Math.floor(a + Math.random()*(b-a+1)); }
+    function accuracy(){ const t=stats.hits+stats.misses; return t? Math.round(stats.hits*100/t):0; }
+    function renderHUD(){
+      hits.textContent=stats.hits; misses.textContent=stats.misses; acc.textContent=accuracy()+'%';
+      avg.textContent=stats.avg==null?'—':stats.avg; hiscore.textContent=hi||0;
+    }
+    function resetSession(){
+      targets.forEach(t=>t.el.remove()); targets.clear();
+      stats={hits:0,misses:0,last:null,avg:null,taps:0,lastSum:0}; renderHUD();
+    }
+    function spawnTarget(){
+      if (!arena || targets.size>=MAX_CONCURRENT) return;
+      const rect=arena.getBoundingClientRect(); const r=rnd(MIN_RADIUS,MAX_RADIUS);
+      const x=rnd(r+6, rect.width-r-6), y=rnd(r+6, rect.height-r-6-4);
+      const el=document.createElement('div'); el.className='target';
+      el.style.width=(r*2)+'px'; el.style.height=(r*2)+'px';
+      el.style.left=(x-r)+'px'; el.style.top=(y-r)+'px';
+      const id=crypto.randomUUID?.()||String(Math.random()).slice(2);
+      const t={id,x,y,r,spawn:performance.now(),el}; targets.set(id,t); arena.appendChild(el);
+      el.addEventListener('click',(e)=>{
+        e.stopPropagation(); const dt=performance.now()-t.spawn; if(dt<MIN_HUMAN_MS) return;
+        stats.hits++; stats.taps++; stats.last=Math.round(dt); stats.lastSum=(stats.lastSum||0)+dt; stats.avg=Math.round(stats.lastSum/stats.taps);
+        if(stats.hits>(hi||0)){ hi=stats.hits; ls.set('tr.hi',hi); } renderHUD(); t.el.remove(); targets.delete(id);
+      });
+      setTimeout(()=>{ if(!targets.has(id)) return; stats.misses++; renderHUD(); t.el.remove(); targets.delete(id); }, TARGET_LIFE_MS);
+    }
+    function boot(){
+      arena=document.getElementById('arena'); renderHUD();
+      setInterval(spawnTarget, SPAWN_EVERY_MS);
+      arena.addEventListener('click',(e)=>{ if(e.target===arena){ stats.misses++; renderHUD(); }});
+      document.getElementById('reset').addEventListener('click', resetSession);
+      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-targetrush', slotKey: 'targetrush' });
+    }
+    window.addEventListener('DOMContentLoaded', boot);
+  </script>
+</head>
+<body>
+<header class="header">
+  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+</header>
+
+<main class="container">
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <div id="ad-targetrush" class="placeholder-ad"></div>
+  </section>
+
+  <section class="card">
+    <h1 style="margin:0">Target Rush</h1>
+    <p class="lead">Hit the shrinking targets as fast as you can. <b>Trial</b> mode — endless practice, no leaderboard (yet).</p>
+    <div id="arena" class="arena" aria-label="Target arena"></div>
+    <div class="hud">
+      <div class="stat"><div class="label">Hits</div><div class="value" id="hits">0</div></div>
+      <div class="stat"><div class="label">Misses</div><div class="value" id="misses">0</div></div>
+      <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">0%</div></div>
+      <div class="stat"><div class="label">Avg Hit (ms)</div><div class="value" id="avg">—</div></div>
+      <div class="stat"><div class="label">Hi-score (hits)</div><div class="value" id="hiscore">0</div></div>
+    </div>
+    <div class="controls"><button id="reset" class="btn" type="button">Reset session</button></div>
+  </section>
+</main>
+
+<footer class="footer">© 2025 ChronoHit</footer>
+</body>
+</html>
