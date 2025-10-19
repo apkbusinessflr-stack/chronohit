@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stroop Blitz — ChronoHit</title>
+  <link rel="stylesheet" href="/assets/chronohit.css" />
+
+  <!-- Dynamic loaders -->
+  <script src="/assets/ga-loader.js"></script>
+  <script src="/assets/ads-loader.js"></script>
+
+  <style>
+    .prompt-area{
+      display:flex; align-items:center; justify-content:center;
+      height:120px; border:1px solid var(--border); border-radius:14px;
+      background:#0e141c; font-weight:900; font-size:34px;
+      margin-top:8px;
+    }
+    @media(min-width:480px){ .prompt-area{ height:140px; font-size:40px; } }
+
+    .pad-grid{ display:grid; gap:10px; margin-top:12px; }
+    .pad{ border-radius:12px; height:56px; border:1px solid var(--border); cursor:pointer; font-weight:800; }
+    .pad:active{ transform:translateY(1px); }
+    .cassist .glyph{ filter: grayscale(0) brightness(1.3); }
+    .glyph{ font-size:18px; opacity:.9; margin-left:8px }
+
+    .timer-wrap{margin:8px 0 12px; height:6px; background:#0e151c; border:1px solid var(--border); border-radius:999px; overflow:hidden}
+    .timer-fill{height:100%; width:0%; background:var(--accent); transition:width .12s linear}
+
+    .backdrop{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:90}
+    .modal{position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+           background:var(--surface); border:1px solid var(--border); border-radius:16px;
+           padding:16px; width:min(520px,92vw); display:none; z-index:91; box-shadow:0 10px 40px rgba(0,0,0,.5)}
+    .modal.open{display:block} .backdrop.open{display:block}
+  </style>
+
+  <script type="module">
+    import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+
+    const deviceId = getDeviceId();
+    const SESSION_MS = 25_000;
+    const MIN_HUMAN_MS = 120; // γνωστικό κατώφλι
+
+    const COLORS = [
+      { name: "RED",    hex: "#FF3B3B", glyph:"●" },
+      { name: "BLUE",   hex: "#3B82F6", glyph:"■" },
+      { name: "GREEN",  hex: "#22C55E", glyph:"◆" },
+      { name: "YELLOW", hex: "#EAB308", glyph:"★" },
+      { name: "PURPLE", hex: "#A855F7", glyph:"●" },
+      { name: "ORANGE", hex: "#F97316", glyph:"■" },
+      { name: "PINK",   hex: "#EC4899", glyph:"◆" },
+      { name: "GRAY",   hex: "#9CA3AF", glyph:"★" },
+    ];
+
+    const MODES = {
+      easy:    { label:"Easy",    colors:4, promptMs:1300, paceMs:1400, incongruent:0.60, decoy:false },
+      default: { label:"Default", colors:6, promptMs:1100, paceMs:1200, incongruent:0.70, decoy:true  },
+      hard:    { label:"Hard",    colors:8, promptMs: 900, paceMs:1000, incongruent:0.80, decoy:true  },
+      trial:   { label:"Trial",   colors:6, promptMs:1100, paceMs:1200, incongruent:0.70, decoy:false, trial:true },
+    };
+
+    let mode="default", running=false, sessionStart=0, timerInt=null, promptTO=null, paceTO=null;
+    let score=0, correct=0, wrong=0, streak=0, streakMax=0, total=0;
+    let cassette=false; // color-blind assist toggle
+
+    // refs
+    let grid, promptEl, timerFill, modeSel, startBtn, howBtn, cbAssist;
+    let hitsEl, wrongEl, accEl, streakEl, totalEl;
+    let backdrop, modal, closeHow;
+
+    function rnd(n){ return Math.floor(Math.random()*n); }
+    function now(){ return performance.now(); }
+    function pct(a,b){ return b>0 ? Math.round((a/b)*100) : 0; }
+
+    function setPads(){
+      const n = MODES[mode].colors;
+      const palette = COLORS.slice(0, n);
+      const cols = n<=4 ? 2 : (n<=6 ? 3 : 4);
+      grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+      grid.innerHTML = "";
+      palette.forEach((c,idx)=>{
+        const btn = document.createElement("button");
+        btn.className = "pad";
+        btn.style.background = c.hex+"22";
+        btn.style.borderColor = c.hex+"55";
+        btn.style.color = "#fff";
+        btn.dataset.color = c.name;
+        btn.innerHTML = `<span>${c.name}</span> <span class="glyph" aria-hidden="true">${c.glyph}</span>`;
+        btn.addEventListener("click", ()=> onAnswer(c.name));
+        grid.appendChild(btn);
+      });
+    }
+
+    function makePrompt(){
+      const n = MODES[mode].colors;
+      const palette = COLORS.slice(0, n);
+      const incong = Math.random() < MODES[mode].incongruent;
+
+      const word = palette[rnd(palette.length)]; // text content
+      let ink = word;
+      if (incong){
+        // pick different color for ink
+        do { ink = palette[rnd(palette.length)]; } while(ink.name === word.name);
+      }
+      return { word, ink };
+    }
+
+    let lastShownAt = 0;
+    function showPrompt(){
+      const p = makePrompt();
+      promptEl.textContent = p.word.name;
+      promptEl.style.color = p.ink.hex;
+      lastShownAt = now();
+
+      // timeout window for current prompt
+      clearTimeout(promptTO);
+      promptTO = setTimeout(()=>{
+        onAnswer(null); // timeout = wrong
+      }, MODES[mode].promptMs);
+    }
+
+    function onAnswer(chosen){
+      if(!running) return;
+      clearTimeout(promptTO);
+      total++;
+
+      const rt = now() - lastShownAt;
+      // Anti-cheat: πολύ γρήγορο => αγνόησέ το (μην προχωρήσεις prompt)
+      if (rt < MIN_HUMAN_MS) {
+        // επανέλαβε το ίδιο prompt window
+        promptTO = setTimeout(()=> onAnswer(null), MODES[mode].promptMs - rt);
+        return;
+      }
+
+      const target = promptEl.style.color; // actual ink
+      // map chosen color name -> hex
+      const map = Object.fromEntries(COLORS.map(c=>[c.name,c.hex.toLowerCase()]));
+      const chosenHex = chosen ? (map[chosen] || "") : ""; // empty on timeout
+      const isCorrect = chosenHex && (chosenHex === target.toLowerCase());
+
+      if(isCorrect){
+        score += 1;
+        correct += 1;
+        streak += 1;
+        if (streak > streakMax) streakMax = streak;
+        try{ navigator.vibrate && navigator.vibrate(20); }catch{}
+      }else{
+        score -= 1;
+        wrong += 1;
+        streak = 0;
+        try{ navigator.vibrate && navigator.vibrate([10,30,10]); }catch{}
+        // μικρό shake
+        promptEl.animate([ { transform:'translateX(0)' }, { transform:'translateX(-6px)' }, { transform:'translateX(6px)' }, { transform:'translateX(0)' } ], { duration: 150 });
+      }
+
+      updateHUD();
+      // pace μεταξύ prompts
+      clearTimeout(paceTO);
+      paceTO = setTimeout(showPrompt, MODES[mode].paceMs);
+    }
+
+    function updateHUD(){
+      hitsEl.textContent = String(correct);
+      wrongEl.textContent = String(wrong);
+      streakEl.textContent = String(streak);
+      accEl.textContent = pct(correct, total) + "%";
+      totalEl.textContent = String(total);
+    }
+
+    function reset(){
+      running=false; clearInterval(timerInt); clearTimeout(promptTO); clearTimeout(paceTO);
+      timerFill.style.width = "0%";
+      score=0; correct=0; wrong=0; streak=0; streakMax=0; total=0;
+      updateHUD();
+      promptEl.textContent = "Get Ready";
+      promptEl.style.color = "#fff";
+    }
+
+    function start(){
+      reset();
+      running = true;
+      sessionStart = now();
+      startBtn.disabled = true;
+      modeSel.disabled = true;
+      // pads (respect cassist toggle)
+      grid.classList.toggle("cassit", !!cassette);
+      // αρχικό prompt άμεσα
+      showPrompt();
+      // timer
+      timerInt = setInterval(()=>{
+        const p = Math.min(1, (now() - sessionStart) / SESSION_MS);
+        timerFill.style.width = (p*100).toFixed(2) + "%";
+        if (p>=1) end();
+      }, 120);
+    }
+
+    function end(){
+      running=false;
+      clearInterval(timerInt); clearTimeout(promptTO); clearTimeout(paceTO);
+      startBtn.disabled = false; modeSel.disabled = false;
+      promptEl.textContent = "Time’s up!";
+
+      // auto-submit (non-trial)
+      if(!MODES[mode].trial){
+        const payload = {
+          game: "sb",
+          device: deviceId,
+          day: todayKey(),
+          score,
+          correct,
+          wrong,
+          streakMax,
+          accuracy: pct(correct, total),
+          mode
+        };
+        fetchJSON("/api/score", { method:"POST", body: JSON.stringify(payload) }).catch(()=>{});
+      }
+    }
+
+    function openHow(){ backdrop.classList.add('open'); modal.classList.add('open'); }
+    function closeHowFn(){ backdrop.classList.remove('open'); modal.classList.remove('open'); }
+
+    window.addEventListener("DOMContentLoaded", ()=>{
+      // refs
+      promptEl  = document.getElementById("prompt");
+      grid      = document.getElementById("grid");
+      timerFill = document.getElementById("timer-fill");
+      modeSel   = document.getElementById("mode");
+      startBtn  = document.getElementById("start");
+      howBtn    = document.getElementById("how");
+      cbAssist  = document.getElementById("cb-assist");
+      hitsEl    = document.getElementById("hits");
+      wrongEl   = document.getElementById("wrong");
+      streakEl  = document.getElementById("streak");
+      accEl     = document.getElementById("acc");
+      totalEl   = document.getElementById("total");
+      backdrop  = document.getElementById("backdrop");
+      modal     = document.getElementById("how-modal");
+      closeHow  = document.getElementById("how-close");
+
+      modeSel.addEventListener("change", (e)=>{ mode = e.target.value; setPads(); reset(); });
+      startBtn.addEventListener("click", start);
+      howBtn.addEventListener("click", openHow);
+      backdrop.addEventListener("click", closeHowFn);
+      closeHow.addEventListener("click", closeHowFn);
+      cbAssist.addEventListener("change", (e)=>{
+        cassette = e.target.checked;
+        document.getElementById("grid").classList.toggle("cassist", cassette);
+      });
+
+      setPads(); reset();
+
+      // Ad slot
+      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-stroop', slotKey: 'stroop' });
+    });
+  </script>
+</head>
+<body>
+<header class="header">
+  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+</header>
+
+<main class="container">
+  <!-- TOP AD -->
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <div id="ad-stroop" class="placeholder-ad"></div>
+  </section>
+
+  <!-- GAME -->
+  <section class="card">
+    <div class="row">
+      <h1 style="margin:0">Stroop Blitz</h1>
+      <button id="how" class="btn" type="button" style="margin-left:auto">How to play</button>
+    </div>
+    <p class="lead">Tap the <b>ink color</b>, not the word. 25s session. Build streaks, keep accuracy high.</p>
+
+    <div class="row" style="gap:12px; align-items:center">
+      <label class="small">Mode:</label>
+      <select id="mode" class="select">
+        <option value="easy">Easy</option>
+        <option value="default" selected>Default</option>
+        <option value="hard">Hard</option>
+        <option value="trial">Trial</option>
+      </select>
+      <label class="small"><input id="cb-assist" type="checkbox" /> Color-blind assist</label>
+      <button id="start" class="btn" type="button" style="margin-left:auto">Start</button>
+    </div>
+
+    <!-- 25s Timer -->
+    <div class="timer-wrap"><div id="timer-fill" class="timer-fill"></div></div>
+
+    <div id="prompt" class="prompt-area" aria-live="polite">Get Ready</div>
+    <div id="grid" class="pad-grid" aria-label="Color choices"></div>
+
+    <div class="stats compact" style="margin-top:12px">
+      <div class="stat"><div class="label">Score</div><div class="value" id="hits">0</div></div>
+      <div class="stat"><div class="label">Wrong</div><div class="value" id="wrong">0</div></div>
+      <div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+      <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">—</div></div>
+      <div class="stat"><div class="label">Prompts</div><div class="value" id="total">0</div></div>
+    </div>
+  </section>
+
+  <!-- How to play modal -->
+  <div id="backdrop" class="backdrop"></div>
+  <section id="how-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="how-title">
+    <div class="row">
+      <h2 id="how-title" style="margin:0">How to play</h2>
+      <button id="how-close" class="btn" type="button" style="margin-left:auto">Got it</button>
+    </div>
+    <ul>
+      <li>Tap the <b>ink color</b>, not the word you read.</li>
+      <li>One answer per prompt. Timeouts count as wrong.</li>
+      <li>Session lasts <b>25 seconds</b>. Trial mode: practice, no submit.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+</body>
+</html>
