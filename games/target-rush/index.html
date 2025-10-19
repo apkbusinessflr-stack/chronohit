@@ -5,124 +5,294 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Target Rush — ChronoHit</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
-  <style>
-    .stage { position:relative; height:360px; border-radius:14px; background:#0e141c; border:1px solid var(--border); overflow:hidden; }
-    .tgt { position:absolute; width:64px; height:64px; border-radius:50%; background:#1a2b3d; border:2px solid #2b3e5a; display:flex; align-items:center; justify-content:center; }
-    .tgt::after { content:''; width:24px; height:24px; border-radius:50%; background:#163221; }
-    .tgt.hit { background:#163221; border-color:#235131; }
-    .count { font-weight:900; }
-  </style>
 
+  <!-- Dynamic loaders -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
+
+  <style>
+    /* Panel layout */
+    .stage   { display:flex; justify-content:center; }
+    .panel   { width:100%; max-width:720px; margin:0 auto; }
+    .bar     { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center }
+    .small   { color:var(--muted); font-size:12px; text-align:center }
+
+    /* Arena + targets */
+    .arena {
+      position: relative;
+      width: 100%;
+      max-width: 560px;
+      height: 360px;
+      margin: 8px auto 0;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #0e141c;
+      overflow: hidden;
+    }
+    @media (min-width: 480px) { .arena { height: 420px; } }
+
+    .target {
+      position: absolute;
+      width: 56px; height: 56px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, #ff6969, #FF3B3B 65%, #a31212);
+      box-shadow: 0 0 18px rgba(255,59,59,.35);
+      border: 2px solid rgba(255,255,255,.08);
+      cursor: pointer;
+      z-index: 5;
+      transition: transform .08s ease;
+      will-change: transform, opacity;
+      touch-action: manipulation;
+    }
+    .target:active { transform: scale(.96); }
+
+    /* HUD stats row */
+    .hud {
+      display:flex; justify-content:space-between; gap:10px; margin-top:8px;
+    }
+    .hud .box {
+      flex:1 1 33%;
+      background:#0d1218; border:1px solid var(--border);
+      border-radius:12px; padding:8px;
+      display:flex; align-items:center; justify-content:center; gap:6px;
+    }
+    .hud .label { color:var(--muted); font-size:12px; }
+    .hud .value { font-weight:900; font-size:18px; }
+
+    /* How-to dialog */
+    dialog.how { max-width:520px; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); }
+    dialog.how::backdrop { background: rgba(0,0,0,.45); }
+  </style>
+
   <script type="module">
-    import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
-    const device = getDeviceId();
+    import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
 
+    // ---- Game config --------------------------------------------------------
     const MODES = {
-      easy:    { spawn: 700, life: 1200 },
-      default: { spawn: 550, life: 1000 },
-      hard:    { spawn: 420, life: 850 }
+      easy:    { label:"Easy",    spawnMs: 800, lifeMs: 1100, parallel: 1, duration: 30000 },
+      default: { label:"Default", spawnMs: 650, lifeMs: 950,  parallel: 1, duration: 30000 },
+      hard:    { label:"Hard",    spawnMs: 520, lifeMs: 820,  parallel: 2, duration: 30000 },
+      trial:   { label:"Trial (endless)", spawnMs: 650, lifeMs: 950, parallel: 1, duration: Infinity, endless:true }
     };
+    const DAILY_LIMIT = 5;
 
-    let mode = 'default', timerId = null, spawnId = null, tRemain = 30_000;
-    let hits = 0, misses = 0, playing = false;
-    let stageEl, timeEl, hitsEl, missesEl, leaderEl, submitBtn, dailyEl;
+    // ---- State --------------------------------------------------------------
+    const device = getDeviceId();
+    let mode = "default";
+    let running = false;
+    let hits = 0, misses = 0;
+    let usedToday = 0;
+    let arenaEl, timerEl, hitsEl, missesEl, infoEl, dailyEl, leaderEl, startBtn, stopBtn, modeSel;
 
-    function rnd(a,b){ return Math.floor(a + Math.random()*(b-a+1)); }
+    let spawnTimer = null, endTimer = null;
+    const liveTargets = new Set();
 
-    function reset(){
-      clearInterval(timerId); clearInterval(spawnId);
-      [...stageEl.querySelectorAll('.tgt')].forEach(n=>n.remove());
-      tRemain = 30_000; hits = 0; misses = 0; playing=false;
-      render();
+    // ---- Utils --------------------------------------------------------------
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const delay = (ms)=>new Promise(r=>setTimeout(r,ms));
+
+    function arenaBounds(){
+      const r = arenaEl.getBoundingClientRect();
+      return { w: r.width, h: r.height };
     }
 
-    function render(){
-      timeEl.textContent = (tRemain/1000).toFixed(0) + 's';
-      hitsEl.textContent = String(hits);
-      missesEl.textContent = String(misses);
-    }
+    function rand(min,max){ return Math.random()*(max-min)+min; }
 
-    function spawn(){
-      const { life } = MODES[mode];
-      const w = stageEl.clientWidth, h = stageEl.clientHeight;
-      const x = rnd(8, Math.max(8, w-72)), y = rnd(8, Math.max(8, h-72));
-      const el = document.createElement('div');
-      el.className = 'tgt'; el.style.left = x+'px'; el.style.top = y+'px';
-      el.addEventListener('click', ()=>{
-        if (!playing) return;
-        hits++; el.classList.add('hit'); setTimeout(()=>el.remove(), 60);
-        render();
-      }, { once:true });
-      stageEl.appendChild(el);
-      setTimeout(()=>{
-        if (el.isConnected){ misses++; el.remove(); render(); }
+    // ---- Targets ------------------------------------------------------------
+    function spawnOne(){
+      if (!running) return;
+      const { w, h } = arenaBounds();
+      const size = 56; // keep same as CSS
+      const pad  = 10;
+      const x = clamp(rand(pad, w - size - pad), pad, w - size - pad);
+      const y = clamp(rand(pad, h - size - pad), pad, h - size - pad);
+
+      const el = document.createElement('button');
+      el.className = 'target';
+      el.type = 'button';
+      el.style.left = x + 'px';
+      el.style.top  = y + 'px';
+
+      const life = MODES[mode].lifeMs;
+      let handled = false;
+
+      const cleanup = () => {
+        if (el.isConnected) arenaEl.removeChild(el);
+        liveTargets.delete(el);
+      };
+
+      const expire = setTimeout(()=>{
+        if (!handled){
+          misses++;
+          updateHUD();
+        }
+        cleanup();
+        maybeAutoEnd();
       }, life);
+
+      el.addEventListener('click', ()=>{
+        if (handled) return;
+        handled = true;
+        clearTimeout(expire);
+        hits++;
+        updateHUD();
+        cleanup();
+      });
+
+      liveTargets.add(el);
+      arenaEl.appendChild(el);
     }
 
-    function start(){
-      if (playing) return;
-      playing = true; reset();
-      const { spawn } = MODES[mode];
-      spawnId = setInterval(spawn, spawn);
-      timerId = setInterval(()=>{
-        tRemain -= 250;
-        if (tRemain <= 0){ stop(); }
-        else render();
-      }, 250);
+    function startSpawning(){
+      const m = MODES[mode];
+      // spawn immediately so ο χρήστης βλέπει στόχο
+      spawnOne();
+      spawnTimer = setInterval(()=>{
+        if (!running) return;
+        // respect parallel cap
+        if (liveTargets.size < m.parallel) spawnOne();
+      }, m.spawnMs);
     }
 
-    function stop(){
-      playing=false;
-      clearInterval(spawnId); clearInterval(timerId);
-      render();
-      submitBtn.disabled = false;
+    function stopSpawning(){
+      if (spawnTimer){ clearInterval(spawnTimer); spawnTimer=null; }
+      // clean existing
+      for (const el of [...liveTargets]) { if (el.isConnected) arenaEl.removeChild(el); }
+      liveTargets.clear();
+    }
+
+    function maybeAutoEnd(){
+      // σε Trial δεν κάνουμε auto-submit/τερματισμό
+      if (MODES[mode].endless) return;
+      // Game ends by timer; εδώ μόνο ασφαλιστική
+    }
+
+    // ---- Game loop ----------------------------------------------------------
+    async function startGame(){
+      if (running) return;
+      running = true; hits = 0; misses = 0; updateHUD();
+      infoEl.textContent = 'Hit the targets!';
+      startBtn.disabled = true; stopBtn.disabled = false; modeSel.disabled = true;
+
+      const m = MODES[mode];
+      startSpawning();
+      const t0 = performance.now();
+      tickTimer(t0, m.duration);
+
+      if (isFinite(m.duration)){
+        endTimer = setTimeout(endGame, m.duration);
+      }
+    }
+
+    function stopGameManual(){
+      if (!running) return;
+      // Trial: απλά σταματάει. Άλλες λειτουργίες: κάνει submit αν δεν είναι Trial.
+      endGame(true);
+    }
+
+    async function endGame(manual=false){
+      if (!running) return;
+      running = false;
+      stopSpawning();
+      startBtn.disabled = false; stopBtn.disabled = true; modeSel.disabled = false;
+      infoEl.textContent = MODES[mode].endless ? 'Stopped' : 'Finished!';
+      if (endTimer){ clearTimeout(endTimer); endTimer=null; }
+
+      if (!MODES[mode].endless){
+        try { await submitScore(); } catch(_){}
+        await refreshDaily(); await loadLeaderboard();
+      }
+    }
+
+    function tickTimer(t0, dur){
+      if (!running) return;
+      const elapsed = performance.now() - t0;
+      if (isFinite(dur)){
+        const left = Math.max(0, Math.ceil((dur - elapsed)/1000));
+        timerEl.textContent = String(left);
+        if (left === 0) return;
+      }else{
+        timerEl.textContent = '∞';
+      }
+      requestAnimationFrame(()=>tickTimer(t0, dur));
+    }
+
+    // ---- HUD / Leaderboard / Daily -----------------------------------------
+    function updateHUD(){
+      hitsEl.textContent   = String(hits);
+      missesEl.textContent = MODES[mode].endless ? '∞' : String(misses);
     }
 
     async function refreshDaily(){
+      if (MODES[mode].endless){
+        dailyEl.textContent = '∞';
+        return;
+      }
       try{
-        const j = await fetchJSON(`/api/daily?game=tr&device=${encodeURIComponent(device)}&day=${todayKey()}`);
-        dailyEl.textContent = `${j.used}/5`;
-      }catch{ dailyEl.textContent = '—/5'; }
+        const j = await fetchJSON(`/api/daily?device=${encodeURIComponent(getDeviceId())}&day=${todayKey()}`);
+        usedToday = j.used || 0;
+        dailyEl.textContent = `${usedToday}/${DAILY_LIMIT}`;
+      }catch{
+        dailyEl.textContent = `—/${DAILY_LIMIT}`;
+      }
     }
 
     async function submitScore(){
-      try{
-        const r = await fetchJSON('/api/score', {
-          method:'POST',
-          body: JSON.stringify({ game:'tr', device, day:todayKey(), best:hits, attempts:misses, mode })
-        });
-        alert(r.message || 'Submitted!');
-        await refreshDaily(); await loadLeaderboard();
-      }catch(e){ alert(e.data?.error || e.message || 'Submit failed'); }
+      // υποβάλλουμε best=score (hits), attempts=misses για συμβατότητα με backend
+      const payload = { game:'tr', device:getDeviceId(), day:todayKey(), best:hits, attempts:misses, mode };
+      return await fetchJSON('/api/score', { method:'POST', body: JSON.stringify(payload) });
     }
 
     async function loadLeaderboard(){
+      if (MODES[mode].endless){
+        leaderEl.innerHTML = `<div class="notice">Trial mode: endless practice — no leaderboard.</div>`;
+        return;
+      }
       try{
         const j = await fetchJSON(`/api/leaderboard?game=tr&range=daily&day=${todayKey()}&limit=20`);
         const items = j.items || [];
-        if(!items.length){ leaderEl.innerHTML = `<div class="notice">No scores yet today.</div>`; return; }
-        const rows = items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.score}</td><td>${it.misses}</td><td>${it.mode}</td></tr>`).join('');
-        leaderEl.innerHTML = `<table class="table"><thead><tr><th>#</th><th>Score</th><th>Misses</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
-      }catch{ leaderEl.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
+        leaderEl.innerHTML = renderTable(items);
+      }catch{
+        leaderEl.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`;
+      }
     }
 
+    function renderTable(items){
+      if (!items.length) return `<div class="notice">No scores yet today. Be the first!</div>`;
+      const rows = items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.best ?? it.score ?? 0}</td><td>${it.mode || 'default'}</td></tr>`).join('');
+      return `<table class="table"><thead><tr><th>#</th><th>Score</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // ---- Boot ---------------------------------------------------------------
     window.addEventListener('DOMContentLoaded', async ()=>{
-      stageEl  = document.getElementById('stage');
-      timeEl   = document.getElementById('time');
-      hitsEl   = document.getElementById('hits');
-      missesEl = document.getElementById('misses');
-      leaderEl = document.getElementById('leader');
-      submitBtn= document.getElementById('submit');
-      const modeSel = document.getElementById('mode');
+      arenaEl = document.getElementById('arena');
+      timerEl = document.getElementById('timer');
+      hitsEl  = document.getElementById('hits');
+      missesEl= document.getElementById('misses');
+      infoEl  = document.getElementById('info');
+      dailyEl = document.getElementById('daily');
+      leaderEl= document.getElementById('leader');
+      startBtn= document.getElementById('start');
+      stopBtn = document.getElementById('stop');
+      modeSel = document.getElementById('mode');
 
-      modeSel.addEventListener('change', (e)=>{ mode = e.target.value; reset(); });
-      document.getElementById('play').addEventListener('click', start);
-      submitBtn.addEventListener('click', submitScore);
+      startBtn.addEventListener('click', startGame);
+      stopBtn.addEventListener('click', stopGameManual);
+      modeSel.addEventListener('change', async (e)=>{
+        mode = e.target.value;
+        updateHUD();
+        await refreshDaily();
+        await loadLeaderboard();
+      });
 
-      await refreshDaily(); await loadLeaderboard();
-      if (window.ChronoAds) ChronoAds.load({ targetId:'ad-tr', slotKey:'targetrush' });
+      document.getElementById('how').addEventListener('click', ()=>document.getElementById('dlg-how').showModal());
+      document.getElementById('close-how').addEventListener('click', ()=>document.getElementById('dlg-how').close());
+
+      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-targetrush', slotKey: 'targetrush' });
+      updateHUD();
+      await refreshDaily();
+      await loadLeaderboard();
+      infoEl.textContent = 'Press Start';
     });
   </script>
 </head>
@@ -131,38 +301,57 @@
   <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
 </header>
 
-<main class="container">
-  <section class="card ad-top">
-    <h2>Ad</h2>
-    <div id="ad-tr" class="placeholder-ad"></div>
-  </section>
+<main class="container stage">
+  <div class="panel">
+    <!-- TOP AD -->
+    <section class="card ad-top">
+      <h2>Ad</h2>
+      <div id="ad-targetrush" class="placeholder-ad"></div>
+    </section>
 
-  <section class="card">
-    <div class="bar">
-      <h1 style="margin:0">Target Rush</h1>
-      <span class="small">Daily: <b id="daily">—/5</b></span>
-      <span class="small">Mode:</span>
-      <select id="mode" class="select">
-        <option value="easy">Easy</option>
-        <option value="default" selected>Default</option>
-        <option value="hard">Hard</option>
-      </select>
-      <button id="play" class="btn" type="button">Play (30s)</button>
-      <button id="submit" class="btn" type="button" disabled>Submit to Daily</button>
-    </div>
+    <!-- GAME -->
+    <section class="card">
+      <div class="bar">
+        <h1 style="margin:0">Target Rush</h1>
+        <button id="how" class="btn" type="button">How to play</button>
+        <button id="start" class="btn" type="button">Start</button>
+        <button id="stop"  class="btn" type="button" disabled>Stop</button>
+        <span class="small">Daily: <b id="daily">—/5</b></span>
+        <span class="small">Mode:</span>
+        <select id="mode" class="select">
+          <option value="easy">Easy</option>
+          <option value="default" selected>Default</option>
+          <option value="hard">Hard</option>
+          <option value="trial">Trial (endless)</option>
+        </select>
+      </div>
 
-    <div class="stage" id="stage"></div>
+      <p id="info" class="lead" style="text-align:center">Press Start</p>
 
-    <div class="stats">
-      <div class="stat"><div class="label">Time</div><div class="value" id="time">30s</div></div>
-      <div class="stat"><div class="label">Hits</div><div class="value" id="hits">0</div></div>
-      <div class="stat"><div class="label">Misses</div><div class="value" id="misses">0</div></div>
-    </div>
+      <div id="arena" class="arena" aria-label="Target area"></div>
 
-    <div id="leader" style="margin-top:12px"></div>
-  </section>
+      <div class="hud">
+        <div class="box"><span class="label">Time</span><span class="value" id="timer">0</span></div>
+        <div class="box"><span class="label">Hits</span><span class="value" id="hits">0</span></div>
+        <div class="box"><span class="label">Misses</span><span class="value" id="misses">0</span></div>
+      </div>
+
+      <div id="leader" style="margin-top:12px"></div>
+      <p class="small">Auto-submit at the end (no manual submit). Trial mode: endless practice (no leaderboard).</p>
+    </section>
+  </div>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+
+<dialog id="dlg-how" class="how">
+  <h3>How to play</h3>
+  <ul>
+    <li>Press <b>Start</b>. Targets appear randomly in the arena.</li>
+    <li>Tap as many as you can before time runs out.</li>
+    <li>Missed targets count against you. Highest <b>Score</b> wins.</li>
+  </ul>
+  <div style="text-align:right"><button id="close-how" class="btn" type="button">Got it</button></div>
+</dialog>
 </body>
 </html>
