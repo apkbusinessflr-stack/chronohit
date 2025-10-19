@@ -4,64 +4,126 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Target Rush — ChronoHit</title>
-  <meta name="description" content="Hit shrinking targets quickly. Endless trial mode." />
-  <meta name="theme-color" content="#FF3B3B" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
-  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
   <link rel="stylesheet" href="/assets/chronohit.css" />
-  <script src="/assets/ga-loader.js"></script>
-  <script src="/assets/ads-loader.js"></script>
   <style>
-    .arena { position: relative; width: 100%; height: 420px; background: #0e141c; border:1px solid var(--border); border-radius: 16px; overflow: hidden; }
-    .target { position: absolute; border-radius: 999px; border: 2px solid rgba(255,59,59,.9); background: rgba(255,59,59,.15); display:flex; align-items:center; justify-content:center; font-weight:900; color:#fff; }
-    .hud { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-    .hud .stat { flex:1 1 160px; background:#0d1218; border:1px solid var(--border); border-radius:12px; padding:10px; }
-    .hud .label{ color:var(--muted); font-size:12px; }
-    .hud .value{ font-weight:900; font-size:22px; }
-    .controls { display:flex; gap:10px; margin-top:10px; }
+    .stage { position:relative; height:360px; border-radius:14px; background:#0e141c; border:1px solid var(--border); overflow:hidden; }
+    .tgt { position:absolute; width:64px; height:64px; border-radius:50%; background:#1a2b3d; border:2px solid #2b3e5a; display:flex; align-items:center; justify-content:center; }
+    .tgt::after { content:''; width:24px; height:24px; border-radius:50%; background:#163221; }
+    .tgt.hit { background:#163221; border-color:#235131; }
+    .count { font-weight:900; }
   </style>
 
+  <script src="/assets/ga-loader.js"></script>
+  <script src="/assets/ads-loader.js"></script>
   <script type="module">
-    import { ls } from "/assets/utils.js";
-    const MIN_HUMAN_MS = 60, SPAWN_EVERY_MS = 900, TARGET_LIFE_MS = 1200, MAX_CONCURRENT = 2;
-    const MIN_RADIUS = 18, MAX_RADIUS = 48;
-    let arena, stats = { hits:0, misses:0, last:null, avg:null, taps:0 }, hi = ls.get("tr.hi", 0);
-    let targets = new Map();
+    import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+    const device = getDeviceId();
+
+    const MODES = {
+      easy:    { spawn: 700, life: 1200 },
+      default: { spawn: 550, life: 1000 },
+      hard:    { spawn: 420, life: 850 }
+    };
+
+    let mode = 'default', timerId = null, spawnId = null, tRemain = 30_000;
+    let hits = 0, misses = 0, playing = false;
+    let stageEl, timeEl, hitsEl, missesEl, leaderEl, submitBtn, dailyEl;
+
     function rnd(a,b){ return Math.floor(a + Math.random()*(b-a+1)); }
-    function accuracy(){ const t=stats.hits+stats.misses; return t? Math.round(stats.hits*100/t):0; }
-    function renderHUD(){
-      hits.textContent=stats.hits; misses.textContent=stats.misses; acc.textContent=accuracy()+'%';
-      avg.textContent=stats.avg==null?'—':stats.avg; hiscore.textContent=hi||0;
+
+    function reset(){
+      clearInterval(timerId); clearInterval(spawnId);
+      [...stageEl.querySelectorAll('.tgt')].forEach(n=>n.remove());
+      tRemain = 30_000; hits = 0; misses = 0; playing=false;
+      render();
     }
-    function resetSession(){
-      targets.forEach(t=>t.el.remove()); targets.clear();
-      stats={hits:0,misses:0,last:null,avg:null,taps:0,lastSum:0}; renderHUD();
+
+    function render(){
+      timeEl.textContent = (tRemain/1000).toFixed(0) + 's';
+      hitsEl.textContent = String(hits);
+      missesEl.textContent = String(misses);
     }
-    function spawnTarget(){
-      if (!arena || targets.size>=MAX_CONCURRENT) return;
-      const rect=arena.getBoundingClientRect(); const r=rnd(MIN_RADIUS,MAX_RADIUS);
-      const x=rnd(r+6, rect.width-r-6), y=rnd(r+6, rect.height-r-6-4);
-      const el=document.createElement('div'); el.className='target';
-      el.style.width=(r*2)+'px'; el.style.height=(r*2)+'px';
-      el.style.left=(x-r)+'px'; el.style.top=(y-r)+'px';
-      const id=crypto.randomUUID?.()||String(Math.random()).slice(2);
-      const t={id,x,y,r,spawn:performance.now(),el}; targets.set(id,t); arena.appendChild(el);
-      el.addEventListener('click',(e)=>{
-        e.stopPropagation(); const dt=performance.now()-t.spawn; if(dt<MIN_HUMAN_MS) return;
-        stats.hits++; stats.taps++; stats.last=Math.round(dt); stats.lastSum=(stats.lastSum||0)+dt; stats.avg=Math.round(stats.lastSum/stats.taps);
-        if(stats.hits>(hi||0)){ hi=stats.hits; ls.set('tr.hi',hi); } renderHUD(); t.el.remove(); targets.delete(id);
-      });
-      setTimeout(()=>{ if(!targets.has(id)) return; stats.misses++; renderHUD(); t.el.remove(); targets.delete(id); }, TARGET_LIFE_MS);
+
+    function spawn(){
+      const { life } = MODES[mode];
+      const w = stageEl.clientWidth, h = stageEl.clientHeight;
+      const x = rnd(8, Math.max(8, w-72)), y = rnd(8, Math.max(8, h-72));
+      const el = document.createElement('div');
+      el.className = 'tgt'; el.style.left = x+'px'; el.style.top = y+'px';
+      el.addEventListener('click', ()=>{
+        if (!playing) return;
+        hits++; el.classList.add('hit'); setTimeout(()=>el.remove(), 60);
+        render();
+      }, { once:true });
+      stageEl.appendChild(el);
+      setTimeout(()=>{
+        if (el.isConnected){ misses++; el.remove(); render(); }
+      }, life);
     }
-    function boot(){
-      arena=document.getElementById('arena'); renderHUD();
-      setInterval(spawnTarget, SPAWN_EVERY_MS);
-      arena.addEventListener('click',(e)=>{ if(e.target===arena){ stats.misses++; renderHUD(); }});
-      document.getElementById('reset').addEventListener('click', resetSession);
-      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-targetrush', slotKey: 'targetrush' });
+
+    function start(){
+      if (playing) return;
+      playing = true; reset();
+      const { spawn } = MODES[mode];
+      spawnId = setInterval(spawn, spawn);
+      timerId = setInterval(()=>{
+        tRemain -= 250;
+        if (tRemain <= 0){ stop(); }
+        else render();
+      }, 250);
     }
-    window.addEventListener('DOMContentLoaded', boot);
+
+    function stop(){
+      playing=false;
+      clearInterval(spawnId); clearInterval(timerId);
+      render();
+      submitBtn.disabled = false;
+    }
+
+    async function refreshDaily(){
+      try{
+        const j = await fetchJSON(`/api/daily?game=tr&device=${encodeURIComponent(device)}&day=${todayKey()}`);
+        dailyEl.textContent = `${j.used}/5`;
+      }catch{ dailyEl.textContent = '—/5'; }
+    }
+
+    async function submitScore(){
+      try{
+        const r = await fetchJSON('/api/score', {
+          method:'POST',
+          body: JSON.stringify({ game:'tr', device, day:todayKey(), best:hits, attempts:misses, mode })
+        });
+        alert(r.message || 'Submitted!');
+        await refreshDaily(); await loadLeaderboard();
+      }catch(e){ alert(e.data?.error || e.message || 'Submit failed'); }
+    }
+
+    async function loadLeaderboard(){
+      try{
+        const j = await fetchJSON(`/api/leaderboard?game=tr&range=daily&day=${todayKey()}&limit=20`);
+        const items = j.items || [];
+        if(!items.length){ leaderEl.innerHTML = `<div class="notice">No scores yet today.</div>`; return; }
+        const rows = items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.score}</td><td>${it.misses}</td><td>${it.mode}</td></tr>`).join('');
+        leaderEl.innerHTML = `<table class="table"><thead><tr><th>#</th><th>Score</th><th>Misses</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }catch{ leaderEl.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
+    }
+
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      stageEl  = document.getElementById('stage');
+      timeEl   = document.getElementById('time');
+      hitsEl   = document.getElementById('hits');
+      missesEl = document.getElementById('misses');
+      leaderEl = document.getElementById('leader');
+      submitBtn= document.getElementById('submit');
+      const modeSel = document.getElementById('mode');
+
+      modeSel.addEventListener('change', (e)=>{ mode = e.target.value; reset(); });
+      document.getElementById('play').addEventListener('click', start);
+      submitBtn.addEventListener('click', submitScore);
+
+      await refreshDaily(); await loadLeaderboard();
+      if (window.ChronoAds) ChronoAds.load({ targetId:'ad-tr', slotKey:'targetrush' });
+    });
   </script>
 </head>
 <body>
@@ -72,24 +134,35 @@
 <main class="container">
   <section class="card ad-top">
     <h2>Ad</h2>
-    <div id="ad-targetrush" class="placeholder-ad"></div>
+    <div id="ad-tr" class="placeholder-ad"></div>
   </section>
 
   <section class="card">
-    <h1 style="margin:0">Target Rush</h1>
-    <p class="lead">Hit the shrinking targets as fast as you can. <b>Trial</b> mode — endless practice, no leaderboard (yet).</p>
-    <div id="arena" class="arena" aria-label="Target arena"></div>
-    <div class="hud">
+    <div class="bar">
+      <h1 style="margin:0">Target Rush</h1>
+      <span class="small">Daily: <b id="daily">—/5</b></span>
+      <span class="small">Mode:</span>
+      <select id="mode" class="select">
+        <option value="easy">Easy</option>
+        <option value="default" selected>Default</option>
+        <option value="hard">Hard</option>
+      </select>
+      <button id="play" class="btn" type="button">Play (30s)</button>
+      <button id="submit" class="btn" type="button" disabled>Submit to Daily</button>
+    </div>
+
+    <div class="stage" id="stage"></div>
+
+    <div class="stats">
+      <div class="stat"><div class="label">Time</div><div class="value" id="time">30s</div></div>
       <div class="stat"><div class="label">Hits</div><div class="value" id="hits">0</div></div>
       <div class="stat"><div class="label">Misses</div><div class="value" id="misses">0</div></div>
-      <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">0%</div></div>
-      <div class="stat"><div class="label">Avg Hit (ms)</div><div class="value" id="avg">—</div></div>
-      <div class="stat"><div class="label">Hi-score (hits)</div><div class="value" id="hiscore">0</div></div>
     </div>
-    <div class="controls"><button id="reset" class="btn" type="button">Reset session</button></div>
+
+    <div id="leader" style="margin-top:12px"></div>
   </section>
 </main>
 
-<footer class="footer">© 2025 ChronoHit</footer>
+<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
 </body>
 </html>
