@@ -1,11 +1,70 @@
-<section class="card">
-  <h2>Sequence Sprint</h2>
-  <p class="lead">Watch & repeat the pad sequence. Longest streak wins.</p>
-  <a class="btn" href="/games/sequence-sprint/">Play →</a>
-</section>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChronoHit — Play & Compete</title>
+  <link rel="stylesheet" href="/assets/chronohit.css" />
 
-<section class="card">
-  <h2>Target Rush</h2>
-  <p class="lead">Hit the targets fast. 30s rush — higher score wins.</p>
-  <a class="btn" href="/games/target-rush/">Play →</a>
-</section>
+  <!-- Dynamic GA4 (reads GA_MEASUREMENT_ID via /api/ga-config) -->
+  <script src="/assets/ga-loader.js"></script>
+
+  <!-- Dynamic AdSense (reads ADSENSE_* via /api/ads-config) -->
+  <script src="/assets/ads-loader.js"></script>
+</head>
+<body>
+<header class="header">
+  <a href="/" class="logo" aria-label="ChronoHit Home">
+    <img src="/assets/logo.svg" alt="" />
+    <span class="brand">ChronoHit</span>
+  </a>
+  <nav class="navright"><span class="badge">LIVE</span></nav>
+</header>
+
+<main class="container">
+  <!-- TOP AD (home) -->
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <!-- CLS-safe placeholder; ChronoAds will inject the responsive ad slot (home) -->
+    <div id="ad-home" class="ad-slot"></div>
+  </section>
+
+  <!-- Intro -->
+  <section class="card">
+    <h1>Play &amp; Compete</h1>
+    <p class="lead">
+      Reflex and focus mini-games. Beat your <b>Best Single</b> and chase your <b>Hi-Score (avg)</b>.
+      New free credits daily.
+    </p>
+  </section>
+
+  <!-- Games -->
+  <section class="card">
+    <h2>Tap Reflex</h2>
+    <p class="lead">Tap when the panel turns green. Simple, brutal, accurate.</p>
+    <a class="btn" href="/games/tap-reflex/">Play →</a>
+  </section>
+
+  <section class="card">
+    <h2>Sequence Sprint</h2>
+    <p class="lead">Watch &amp; repeat the pad sequence (3×3 / 3×4 / 4×4). Longest streak wins.</p>
+    <a class="btn" href="/games/sequence-sprint/">Play →</a>
+  </section>
+
+  <section class="card">
+    <h2>Target Rush</h2>
+    <p class="lead">30-second rush. Hit the targets fast. Higher score wins.</p>
+    <a class="btn" href="/games/target-rush/">Play →</a>
+  </section>
+</main>
+
+<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+
+<!-- Trigger dynamic ad load (call after consent if using CMP) -->
+<script>
+  if (window.ChronoAds) {
+    ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
+  }
+</script>
+</body>
+</html>
