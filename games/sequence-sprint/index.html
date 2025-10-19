@@ -5,54 +5,94 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sequence Sprint — ChronoHit</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
+
+  <!-- Make the game UI ~50% smaller & tidy visuals -->
   <style>
-    .grid { display:grid; gap:10px; margin:10px 0; }
-    .pad { aspect-ratio:1/1; border-radius:14px; background:#0f1722; border:1px solid var(--border);
-           box-shadow: inset 0 0 0 2px rgba(255,255,255,0.02); transition:transform .06s, background .12s; }
+    .wrap { display:flex; flex-direction:column; gap:12px; }
+    .grid { display:grid; gap:8px; margin:8px 0; }
+    /* Half-sized max widths per layout */
+    .grid.grid-3x3  { grid-template-columns: repeat(3, 1fr); max-width: 200px; width:100%; }
+    .grid.grid-3x4  { grid-template-columns: repeat(3, 1fr); max-width: 230px; width:100%; }
+    .grid.grid-4x4  { grid-template-columns: repeat(4, 1fr); max-width: 260px; width:100%; }
+
+    .pad {
+      aspect-ratio: 1/1;
+      border-radius: 12px;
+      background: #0f1722;
+      border: 1px solid var(--border);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.02);
+      transition: transform .06s, background .12s, box-shadow .12s;
+    }
     .pad:active { transform: scale(.98); }
-    .pad.show { background:#1a2b3d; }
-    .pad.ok { background:#163221; }
-    .pad.bad { background:#3b1e1e; }
+
+    /* Playback flash (game shows the sequence) */
+    .pad.show {
+      background: #1a2b3d;
+      box-shadow: 0 0 10px rgba(255,255,255,.12), inset 0 0 0 2px rgba(255,255,255,.08);
+    }
+
+    /* Wrong tap quick flash (we remove it immediately after) */
+    .pad.bad {
+      background: #3b1e1e;
+      box-shadow: 0 0 10px rgba(255,59,59,.25);
+    }
+
     .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    dialog.how { max-width:520px; border:1px solid var(--border); border-radius:16px; background:var(--surface); color:var(--text); }
-    dialog.how::backdrop { background: rgba(0,0,0,.4); }
+    .small { color: var(--muted); font-size: 12px; }
+
+    dialog.how { max-width:480px; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); }
+    dialog.how::backdrop { background: rgba(0,0,0,.45); }
   </style>
 
+  <!-- Dynamic loaders -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
+
   <script type="module">
     import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
 
-    const device = getDeviceId();
-    const DAILY_LIMIT = 5;
-    const MIN_SHOW = 280, SHOW_DECAY = 10, MIN_GAP = 80;
+    // Modes: grid sizes (half-sized UI via CSS above)
     const MODES = {
-      easy:   { label:"Easy 3×3",   rows:3, cols:3 },
-      medium: { label:"Medium 3×4", rows:4, cols:3 },
-      hard:   { label:"Hard 4×4",   rows:4, cols:4 },
-      trial:  { label:"Trial (endless)", rows:4, cols:4, endless:true }
+      easy:   { label: "Easy 3×3",   rows: 3, cols: 3 },
+      medium: { label: "Medium 3×4", rows: 4, cols: 3 },
+      hard:   { label: "Hard 4×4",   rows: 4, cols: 4 },
+      trial:  { label: "Trial (endless)", rows: 4, cols: 4, endless: true }
     };
 
-    let mode = 'easy', sequence = [], inputIdx = 0, locked = false;
+    // Playback timing (slightly faster because smaller UI)
+    const MIN_SHOW = 240, SHOW_DECAY = 10, MIN_GAP = 70;
+    const DAILY_LIMIT = 5;
+    const device = getDeviceId();
+
+    let mode = 'easy';
+    let sequence = [];
+    let inputIdx = 0;
+    let locked = false;       // true while playing back sequence
+    let running = false;      // true after "Start" pressed
     let longest = 0, current = 0, mistakes = 0, speed = 0;
 
-    let gridEl, infoEl, longestEl, mistakesEl, submitBtn, dailyEl, leaderEl;
+    let gridEl, infoEl, longestEl, mistakesEl, submitBtn, dailyEl, leaderEl, startBtn, modeSel;
 
-    function rng(max){ return Math.floor(Math.random()*max); }
+    function rng(n){ return Math.floor(Math.random()*n); }
     function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-    function buildGrid(r,c){
+    function classForGrid(rows, cols){
+      if (rows===3 && cols===3) return 'grid-3x3';
+      if (rows===4 && cols===3) return 'grid-3x4';
+      return 'grid-4x4';
+    }
+
+    function buildGrid(rows, cols){
+      gridEl.className = `grid ${classForGrid(rows, cols)}`;
       gridEl.innerHTML = '';
-      gridEl.style.gridTemplateColumns = `repeat(${c}, 1fr)`;
-      const total = r*c;
-      for(let i=0;i<total;i++){
-        const d = document.createElement('button');
-        d.className = 'pad';
-        d.type = 'button';
-        d.dataset.idx = String(i);
-        d.addEventListener('click', onPad);
-        gridEl.appendChild(d);
+      const total = rows * cols;
+      for (let i=0;i<total;i++){
+        const b = document.createElement('button');
+        b.className = 'pad';
+        b.type = 'button';
+        b.dataset.idx = String(i);
+        b.addEventListener('click', onPad);
+        gridEl.appendChild(b);
       }
     }
 
@@ -63,8 +103,10 @@
       current = 0;
       mistakes = 0;
       speed = 0;
+      running = false;
       renderStats();
-      infoEl.textContent = 'Watch the sequence…';
+      infoEl.textContent = 'Press Start';
+      submitBtn.disabled = true;
     }
 
     function renderStats(){
@@ -75,11 +117,12 @@
     async function showSequence(){
       locked = true;
       const pads = [...gridEl.children];
-      const showMs = Math.max(MIN_SHOW, 600 - speed*SHOW_DECAY);
-      for(const idx of sequence){
-        pads[idx].classList.add('show');
+      const showMs = Math.max(MIN_SHOW, 520 - speed*SHOW_DECAY);
+      for (const idx of sequence){
+        const el = pads[idx];
+        el.classList.add('show');
         await delay(showMs);
-        pads[idx].classList.remove('show');
+        el.classList.remove('show');
         await delay(Math.max(MIN_GAP, showMs/3));
       }
       locked = false;
@@ -93,43 +136,65 @@
     }
 
     async function onPad(e){
-      if (locked) return;
-      const idx = Number(e.currentTarget.dataset.idx);
+      // Ignore taps if game hasn't started
+      if (!running || locked) return;
+
+      const el = e.currentTarget;
+      const idx = Number(el.dataset.idx);
       const expected = sequence[inputIdx];
+
+      // Requirement: when tapping, pad should NOT stay lit.
+      // We won't add any "ok" class; only wrong taps flash briefly with 'bad'.
       if (idx === expected){
-        e.currentTarget.classList.add('ok');
-        setTimeout(()=>e.currentTarget.classList.remove('ok'), 130);
         inputIdx++;
         if (inputIdx === sequence.length){
+          // Round complete
           current++;
           longest = Math.max(longest, current);
+          const prev = ls.get('ss.hi', 0);
+          if (longest > prev) ls.set('ss.hi', longest);
           renderStats();
-          if (!MODES[mode].endless && sequence.length >= 100) return; // safety stop
+          if (!MODES[mode].endless && sequence.length >= 100) {
+            infoEl.textContent = 'Max round reached.';
+            submitBtn.disabled = false;
+            return;
+          }
           inputIdx = 0;
           extendSequence();
           infoEl.textContent = 'Watch…';
-          await delay(300);
+          await delay(250);
           await showSequence();
         }
       } else {
-        e.currentTarget.classList.add('bad');
-        setTimeout(()=>e.currentTarget.classList.remove('bad'), 160);
+        // Wrong → quick red flash; never stays on
+        el.classList.add('bad');
+        setTimeout(()=>el.classList.remove('bad'), 120);
         mistakes++;
         renderStats();
-        // new round
+        // Reset to new round
         inputIdx = 0; current = 0; sequence = [];
         infoEl.textContent = 'Oops! New round.';
         extendSequence();
-        await delay(400);
+        await delay(320);
         await showSequence();
       }
     }
 
     async function startGame(){
-      resetSession();
+      if (running) return;
+      running = true;
+      sequence = [];
+      inputIdx = 0;
+      current = 0;
+      mistakes = 0;
+      speed = 0;
+      renderStats();
+      infoEl.textContent = 'Watch the sequence…';
       extendSequence();
-      await delay(350);
+      await delay(300);
       await showSequence();
+      // Enable submit if not Trial (score becomes valid after first repeat)
+      if (!MODES[mode].endless) submitBtn.disabled = false;
     }
 
     async function refreshDaily(){
@@ -140,12 +205,12 @@
         return;
       }
       try{
-        const j = await fetchJSON(`/api/daily?game=ss&device=${encodeURIComponent(device)}&day=${todayKey()}`);
+        const j = await fetchJSON(`/api/daily?game=ss&device=${encodeURIComponent(getDeviceId())}&day=${todayKey()}`);
         dailyEl.textContent = `${j.used}/${DAILY_LIMIT}`;
-        submitBtn.disabled = (j.used >= DAILY_LIMIT) || longest < 1;
+        // Submit remains enabled while running; but disallow if daily limit reached
+        if (j.used >= DAILY_LIMIT) submitBtn.disabled = true;
       }catch{
         dailyEl.textContent = `—/${DAILY_LIMIT}`;
-        submitBtn.disabled = longest < 1;
       }
     }
 
@@ -155,14 +220,20 @@
         const r = await fetchJSON('/api/score', {
           method:'POST',
           body: JSON.stringify({
-            game:'ss', device, day:todayKey(),
-            best: longest, attempts: mistakes, mode
+            game:'ss',
+            device: getDeviceId(),
+            day: todayKey(),
+            best: longest,         // longest streak = primary metric
+            attempts: mistakes,    // mistakes as secondary
+            mode
           })
         });
         alert(r.message || 'Submitted!');
         await refreshDaily();
         await loadLeaderboard();
-      }catch(e){ alert(e.data?.error || e.message || 'Submit failed'); }
+      }catch(e){
+        alert(e.data?.error || e.message || 'Submit failed');
+      }
     }
 
     async function loadLeaderboard(){
@@ -170,50 +241,54 @@
       try{
         const j = await fetchJSON(`/api/leaderboard?game=ss&range=daily&day=${todayKey()}&limit=20`);
         leaderEl.innerHTML = renderTable(j.items||[]);
-      }catch{ leaderEl.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
+      }catch{
+        leaderEl.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`;
+      }
     }
 
     function renderTable(items){
       if(!items.length) return `<div class="notice">No scores yet today. Be the first!</div>`;
-      const rows = items.map((it, i)=>`<tr><td>${i+1}</td><td>${it.longest}</td><td>${it.mistakes}</td><td>${it.mode}</td></tr>`).join('');
+      const rows = items.map((it, i)=>`<tr><td>${i+1}</td><td>${it.longest}</td><td>${it.mistakes}</td><td>${it.mode||'default'}</td></tr>`).join('');
       return `<table class="table"><thead><tr><th>#</th><th>Longest</th><th>Mistakes</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
     window.addEventListener('DOMContentLoaded', async ()=>{
-      gridEl = document.getElementById('grid');
-      infoEl = document.getElementById('info');
-      longestEl = document.getElementById('longest');
+      // Wire elements
+      gridEl     = document.getElementById('grid');
+      infoEl     = document.getElementById('info');
+      longestEl  = document.getElementById('longest');
       mistakesEl = document.getElementById('mistakes');
-      submitBtn = document.getElementById('submit');
-      dailyEl = document.getElementById('daily');
-      leaderEl = document.getElementById('leader');
+      submitBtn  = document.getElementById('submit');
+      dailyEl    = document.getElementById('daily');
+      leaderEl   = document.getElementById('leader');
+      startBtn   = document.getElementById('start');
+      modeSel    = document.getElementById('mode');
 
-      const modeSel = document.getElementById('mode');
+      // Build initial grid (no auto-start)
+      const { rows, cols } = MODES[mode];
+      buildGrid(rows, cols);
+      resetSession();
+
+      // Events
+      startBtn.addEventListener('click', startGame);
+      submitBtn.addEventListener('click', submitScore);
       modeSel.addEventListener('change', async (e)=>{
         mode = e.target.value;
-        const { rows, cols } = MODES[mode];
-        buildGrid(rows, cols);
+        const m = MODES[mode];
+        buildGrid(m.rows, m.cols);
+        resetSession();
         await refreshDaily();
         await loadLeaderboard();
-        startGame();
       });
 
-      // Build initial grid
-      buildGrid(MODES[mode].rows, MODES[mode].cols);
+      // Ads & data
+      if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-sequencesprint', slotKey: 'sequencesprint' });
       await refreshDaily();
       await loadLeaderboard();
-      startGame();
 
-      // Top ad
-      if (window.ChronoAds) ChronoAds.load({ targetId:'ad-ss', slotKey:'sequencesprint' });
-
-      // How to play modal
-      document.getElementById('how').addEventListener('click', ()=>{
-        document.getElementById('dlg-how').showModal();
-      });
-      document.getElementById('close-how').addEventListener('click', ()=>{
-        document.getElementById('dlg-how').close();
-      });
+      // How-to modal
+      document.getElementById('how').addEventListener('click', ()=>document.getElementById('dlg-how').showModal());
+      document.getElementById('close-how').addEventListener('click', ()=>document.getElementById('dlg-how').close());
     });
   </script>
 </head>
@@ -223,47 +298,57 @@
 </header>
 
 <main class="container">
+  <!-- TOP AD -->
   <section class="card ad-top">
     <h2>Ad</h2>
-    <div id="ad-ss" class="placeholder-ad"></div>
+    <div id="ad-sequencesprint" class="placeholder-ad"></div>
   </section>
 
+  <!-- GAME -->
   <section class="card">
     <div class="bar">
       <h1 style="margin:0">Sequence Sprint</h1>
       <button id="how" class="btn" type="button">How to play</button>
+      <button id="start" class="btn" type="button">Start</button>
       <span class="small">Daily: <b id="daily">—/5</b></span>
       <span class="small">Mode:</span>
       <select id="mode" class="select">
-        <option value="easy">Easy (3×3)</option>
+        <option value="easy" selected>Easy (3×3)</option>
         <option value="medium">Medium (3×4)</option>
         <option value="hard">Hard (4×4)</option>
         <option value="trial">Trial (endless)</option>
       </select>
     </div>
-    <p id="info" class="lead">Watch the sequence…</p>
-    <div id="grid" class="grid"></div>
 
-    <div class="stats">
-      <div class="stat"><div class="label">Longest</div><div class="value mono" id="longest">0</div></div>
-      <div class="stat"><div class="label">Mistakes</div><div class="value mono" id="mistakes">0</div></div>
+    <p id="info" class="lead">Press Start</p>
+
+    <div class="wrap">
+      <div id="grid" class="grid grid-3x3" aria-label="Pads grid"></div>
+
+      <div class="stats">
+        <div class="stat"><div class="label">Longest</div><div class="value" id="longest">0</div></div>
+        <div class="stat"><div class="label">Mistakes</div><div class="value" id="mistakes">0</div></div>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button id="submit" class="btn" type="button" disabled>Submit to Daily Leaderboard</button>
+      </div>
+
+      <div id="leader" style="margin-top:12px"></div>
+      <p class="small">No numbers on pads. Playback lights show the sequence. Your taps never remain lit.</p>
     </div>
-
-    <div class="row" style="margin-top:10px">
-      <button id="submit" class="btn" type="button">Submit to Daily Leaderboard</button>
-    </div>
-
-    <div id="leader" style="margin-top:12px"></div>
   </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
 
+<!-- How-to dialog -->
 <dialog id="dlg-how" class="how">
   <h3>How to play</h3>
   <ul>
+    <li>Press <b>Start</b> to begin.</li>
     <li>Watch the pads light up — that’s the sequence.</li>
-    <li>Repeat the same sequence by tapping the pads.</li>
+    <li>Repeat the sequence by tapping the same pads.</li>
     <li>Each round adds +1 step. Longest streak wins.</li>
   </ul>
   <div style="text-align:right"><button id="close-how" class="btn" type="button">Got it</button></div>
