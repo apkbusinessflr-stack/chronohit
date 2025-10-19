@@ -1,3 +1,28 @@
-(function(){let loaded=false;async function cfg(){try{const r=await fetch('/api/ga-config',{credentials:'same-origin'});return await r.json()}catch(e){return{enabled:false}}}
-function inject(id){if(loaded||!id)return;const s=document.createElement('script');s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id='+encodeURIComponent(id);s.onload=init.bind(null,id);document.head.appendChild(s)}function init(id){if(loaded)return;window.dataLayer=window.dataLayer||[];function g(){dataLayer.push(arguments)}window.gtag=g;g('js',new Date());g('config',id,{anonymize_ip:true,send_page_view:true});loaded=true}
-async function boot(){const c=await cfg();if(!c?.enabled)return;inject(c.id)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot()})();
+// + ΝΕΟ: έλεγχος DNT
+function dntEnabled() {
+  const dnt = (navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack || '0') + '';
+  return dnt === '1' || dnt === 'yes';
+}
+
+// + ΝΕΟ: helper για consent (αν βάλεις CMP αργότερα)
+window.GAConsent = {
+  set(consentObject) {
+    if (!window.gtag) return;
+    window.gtag('consent', 'update', consentObject || {});
+  }
+};
+
+// + Στο boot(): μην φορτώσεις GA αν DNT
+const cfg = await getConfig();
+if (!cfg?.enabled) return;
+if (dntEnabled()) { console.info('[GA] Skipped due to Do-Not-Track'); return; }
+injectGtag(cfg.id);
+
+// + Στο initGtag(): default consent “ασφαλές”
+gtag('consent', 'default', {
+  ad_storage: 'denied',
+  analytics_storage: 'granted',
+  functionality_storage: 'granted',
+  personalization_storage: 'denied',
+  security_storage: 'granted'
+});
