@@ -4,100 +4,163 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tap Reflex — ChronoHit</title>
-  <meta name="description" content="Tap when it turns green. Daily challenge and endless trial mode." />
-  <meta name="theme-color" content="#FF3B3B" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" href="/assets/icons/icon-192.png" sizes="192x192" />
-  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
-
   <link rel="stylesheet" href="/assets/chronohit.css" />
+
+  <!-- Dynamic loaders -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
 
+  <!-- Local UI tweaks: compact panel, modal, timer -->
   <style>
-    .ad-top { margin-top: 8px; }
-    .tap-area.compact { font-size: 18px; padding: 18px; min-height: 120px; border-radius: 14px; }
-    .stats.compact .label { font-size: 10px; }
-    .stats.compact .value { font-size: 16px; }
-    @media (min-width: 480px) {
-      .tap-area.compact { min-height: 140px; font-size: 20px; }
-      .stats.compact .value { font-size: 18px; }
+    .tap-area.compact{
+      font-size:18px; padding:18px; min-height:140px; border-radius:14px;
     }
+    .stats.compact .label{font-size:10px}
+    .stats.compact .value{font-size:16px}
+    @media(min-width:480px){
+      .tap-area.compact{min-height:160px;font-size:20px}
+      .stats.compact .value{font-size:18px}
+    }
+
+    /* Timer bar (25s) */
+    .timer-wrap{margin:8px 0 12px; height:6px; background:#0e151c; border:1px solid var(--border); border-radius:999px; overflow:hidden}
+    .timer-fill{height:100%; width:0%; background:var(--accent); transition:width .2s linear}
+
+    /* Modal + backdrop so it’s clearly visible */
+    .backdrop{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:90}
+    .modal{position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+           background:var(--surface); border:1px solid var(--border); border-radius:16px;
+           padding:16px; width:min(520px,92vw); display:none; z-index:91; box-shadow:0 10px 40px rgba(0,0,0,.5)}
+    .modal.open{display:block}
+    .backdrop.open{display:block}
   </style>
 
   <script type="module">
     import { ls, getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
-    const MIN_HUMAN_MS = 60;
-    const MODES = {
-      easy:    { label: "Easy",    range: [1500, 2700], endless: false },
-      default: { label: "Default", range: [1200, 2400], endless: false },
-      hard:    { label: "Hard",    range: [ 900, 1800], endless: false },
-      trial:   { label: "Trial (endless)", range: [1200, 2400], endless: true }
-    };
-    const DAILY_LIMIT = 5, SUBMIT_MIN_ATTEMPTS = 5;
 
-    let state="idle", startTs=0; let sum=0, attempts=0, bestSingle=null; let waitTimer=null; let mode="default";
+    /* ───────── Config ───────── */
+    const MIN_HUMAN_MS = 60;
+    const SESSION_MS   = 25_000;              // 25 seconds per session
+    const DAILY_LIMIT = 5, SUBMIT_MIN_ATTEMPTS = 5;
+    // Wait window per mode (όπως το είχαμε)
+    const MODES = {
+      easy:    { label:"Easy (1.5–2.7s)",    range:[1500,2700], endless:false },
+      default: { label:"Default (1.2–2.4s)", range:[1200,2400], endless:false },
+      hard:    { label:"Hard (0.9–1.8s)",    range:[ 900,1800], endless:false },
+      trial:   { label:"Trial (endless)",    range:[1200,2400], endless:true  } // trial: ΔΕΝ κάνει submit
+    };
+
+    /* ───────── State ───────── */
+    let mode="default", state="idle", startTs=0, waitTimer=null, sessionTimer=null, sessionStart=0;
+    let sum=0, attempts=0, bestSingle=null;
     const deviceId = getDeviceId();
 
-    let tapEl,lastEl,avgEl,bestEl,hiEl,attemptsEl,resetBtn,modeSel,submitBtn,leaderWrap,dailyCounterEl,noticeEl;
+    /* ───────── El refs ───────── */
+    let tapEl,lastEl,avgEl,bestEl,hiEl,attemptsEl,resetBtn,modeSel,leaderWrap,dailyCounterEl,trialNote;
+    let timerFillEl, howBtn, backdropEl, modalEl, modalCloseBtn;
 
-    const vibrate=(ms)=>{ try{ if(navigator.vibrate) navigator.vibrate(ms);}catch(_){} };
+    const vibrate=ms=>{ try{ navigator.vibrate && navigator.vibrate(ms);}catch(_){} };
     const rnd=(a,b)=>Math.floor(a+Math.random()*(b-a+1));
     const setState=(s,text,cls)=>{ state=s; tapEl.className=`tap-area compact ${cls||""}`.trim(); tapEl.textContent=text; };
+
+    /* ───────── Renderers ───────── */
     const render=()=>{
       lastEl.textContent = window._last==null ? "—" : Math.round(window._last);
       avgEl.textContent  = attempts? Math.round(sum/attempts) : "—";
-      attemptsEl.textContent = MODES[mode].endless ? "∞" : attempts;
+      attemptsEl.textContent = attempts || (MODES[mode].endless ? "∞" : "0");
       bestEl.textContent = bestSingle!=null? Math.round(bestSingle) : "—";
       const hi = ls.get("tap.hiAvg", null);
       hiEl.textContent = hi!=null? Math.round(hi) : "—";
     };
     const saveHi=()=>{ if(!attempts) return; const avg=sum/attempts; const prev=ls.get("tap.hiAvg",null); if(prev==null||avg<prev) ls.set("tap.hiAvg",Math.round(avg)); };
-    const resetSession=()=>{ if(waitTimer){clearTimeout(waitTimer); waitTimer=null;} sum=0; attempts=0; bestSingle=null; window._last=null; setState("idle","Tap to start","ready"); render(); };
-    const scheduleWait=()=>{ const [dmin,dmax]=MODES[mode].range; setState("waiting","Wait...","wait"); const wait=rnd(dmin,dmax); waitTimer=setTimeout(()=>{ startTs=performance.now(); setState("go","TAP!","go"); waitTimer=null; },wait); };
+
+    const resetSession=()=>{
+      if(waitTimer){clearTimeout(waitTimer); waitTimer=null;}
+      if(sessionTimer){clearInterval(sessionTimer); sessionTimer=null;}
+      sum=0; attempts=0; bestSingle=null; window._last=null;
+      setState("idle","Tap to start","ready");
+      timerFillEl.style.width="0%";
+      render();
+    };
+
+    /* ───────── Timing ───────── */
+    const scheduleWait=()=>{
+      const [dmin,dmax]=MODES[mode].range;
+      setState("waiting","Wait...","wait");
+      const wait=rnd(dmin,dmax);
+      waitTimer=setTimeout(()=>{
+        startTs=performance.now();
+        setState("go","TAP!","go");
+        waitTimer=null;
+      },wait);
+    };
+
+    function begin25sSession(){
+      sessionStart = performance.now();
+      // progress loop
+      sessionTimer = setInterval(()=>{
+        const elapsed = performance.now() - sessionStart;
+        const pct = Math.min(100, (elapsed/SESSION_MS)*100);
+        timerFillEl.style.width = pct.toFixed(2) + "%";
+        if(elapsed >= SESSION_MS){
+          clearInterval(sessionTimer); sessionTimer=null;
+          endOfSession();
+        }
+      }, 120);
+    }
+
+    async function endOfSession(){
+      // Auto-submit μόνο για non-trial και μόνο αν έχουμε attempts >= SUBMIT_MIN_ATTEMPTS
+      if (!MODES[mode].endless && attempts>=SUBMIT_MIN_ATTEMPTS){
+        const avg=Math.round(sum/attempts), best=Math.round(bestSingle||0);
+        try{
+          await fetchJSON("/api/score", {
+            method:"POST",
+            body:JSON.stringify({ device:deviceId, day:todayKey(), avg, best, attempts, mode })
+          });
+          await refreshDaily();
+          await loadLeaderboard();
+        }catch(e){
+          console.warn("Auto submit failed:", e);
+        }
+      }
+      setState("idle","Time’s up! Tap to restart","ready");
+    }
+
+    /* ───────── Input ───────── */
     const onTap=()=>{
-      if(state==="idle"){ scheduleWait(); return; }
-      if(state==="waiting"){ setState("toosoon","Too soon!","too-soon"); setTimeout(resetSession,700); return; }
+      if(state==="idle"){
+        // Κάθε νέο session είναι 25s — ακόμα και στο trial (χωρίς submit)
+        resetSession(); begin25sSession(); scheduleWait(); return;
+      }
+      if(state==="waiting"){
+        setState("toosoon","Too soon!","too-soon");
+        setTimeout(scheduleWait,700);
+        return;
+      }
       if(state==="go"){
         const r = performance.now()-startTs; window._last=r;
         if(r>=MIN_HUMAN_MS){ attempts++; sum+=r; if(bestSingle==null||r<bestSingle) bestSingle=r; saveHi(); vibrate(35); }
         render(); setState("idle","Nice! Tap again","ready");
+        // Αν είμαστε μέσα στα 25s, συνεχίζουμε — αλλιώς θα κλείσει το session από το timer
+        if(sessionTimer) scheduleWait();
       }
     };
 
+    /* ───────── Daily / Leaderboard ───────── */
     async function refreshDaily(){
-      if (MODES[mode].endless) {
-        dailyCounterEl.textContent = "—";
-        submitBtn.disabled = true;
-        noticeEl.style.display = "block";
-        leaderWrap.innerHTML = `<div class="notice">Trial mode: endless practice — no leaderboard.</div>`;
-        return;
-      }
-      noticeEl.style.display = "none";
+      if (MODES[mode].endless){ dailyCounterEl.textContent = "—/5"; return; }
       try{
         const j = await fetchJSON(`/api/daily?device=${encodeURIComponent(deviceId)}&day=${todayKey()}`);
         dailyCounterEl.textContent = `${j.used}/${DAILY_LIMIT}`;
-        submitBtn.disabled = !(attempts>=SUBMIT_MIN_ATTEMPTS) || (j.used>=DAILY_LIMIT);
-      }catch(e){
-        dailyCounterEl.textContent = `—/${DAILY_LIMIT}`;
-        submitBtn.disabled = !(attempts>=SUBMIT_MIN_ATTEMPTS);
-      }
-    }
-    async function submitDaily(){
-      if (MODES[mode].endless) return;
-      if(attempts<SUBMIT_MIN_ATTEMPTS) return;
-      const avg=Math.round(sum/attempts), best=Math.round(bestSingle||0);
-      try{
-        const r = await fetchJSON("/api/score", { method:"POST", body:JSON.stringify({ device:deviceId, day:todayKey(), avg, best, attempts, mode }) });
-        await refreshDaily(); await loadLeaderboard(); alert(r.message||"Submitted!");
-      }catch(e){ alert(e.data?.error||e.message||"Submit failed"); }
+      }catch{ dailyCounterEl.textContent = `—/${DAILY_LIMIT}`; }
     }
     async function loadLeaderboard(){
-      if (MODES[mode].endless) return;
+      if (MODES[mode].endless) { leaderWrap.innerHTML = `<div class="notice">Trial mode: endless practice — no leaderboard.</div>`; return; }
       try{
         const j = await fetchJSON(`/api/leaderboard?range=daily&day=${todayKey()}&limit=20`);
         leaderWrap.innerHTML = renderTable(j.items||[]);
-      }catch(e){ leaderWrap.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
+      }catch{ leaderWrap.innerHTML = `<div class="notice">Leaderboard unavailable.</div>`; }
     }
     function renderTable(items){
       if(!items.length) return `<div class="notice">No scores yet today. Be the first!</div>`;
@@ -105,31 +168,50 @@
       return `<table class="table"><thead><tr><th>#</th><th>Avg</th><th>Attempts</th><th>Mode</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
+    /* ───────── Modal helpers ───────── */
+    function openHow(){ backdropEl.classList.add('open'); modalEl.classList.add('open'); }
+    function closeHow(){ backdropEl.classList.remove('open'); modalEl.classList.remove('open'); }
+
+    /* ───────── Boot ───────── */
     window.addEventListener("DOMContentLoaded", async ()=>{
-      tapEl=document.getElementById("tap"); lastEl=document.getElementById("last"); avgEl=document.getElementById("avg");
-      bestEl=document.getElementById("best"); hiEl=document.getElementById("hi"); attemptsEl=document.getElementById("attempts");
-      resetBtn=document.getElementById("reset"); modeSel=document.getElementById("mode"); submitBtn=document.getElementById("submit");
-      leaderWrap=document.getElementById("leader"); dailyCounterEl=document.getElementById("daily-counter"); noticeEl=document.getElementById("trial-note");
+      // refs
+      tapEl=document.getElementById("tap");
+      lastEl=document.getElementById("last");
+      avgEl=document.getElementById("avg");
+      bestEl=document.getElementById("best");
+      hiEl=document.getElementById("hi");
+      attemptsEl=document.getElementById("attempts");
+      modeSel=document.getElementById("mode");
+      leaderWrap=document.getElementById("leader");
+      dailyCounterEl=document.getElementById("daily-counter");
+      trialNote=document.getElementById("trial-note");
+      timerFillEl=document.getElementById("timer-fill");
+      howBtn=document.getElementById("how");
+      backdropEl=document.getElementById("backdrop");
+      modalEl=document.getElementById("how-modal");
+      modalCloseBtn=document.getElementById("how-close");
 
       tapEl.addEventListener("click", onTap);
       tapEl.addEventListener("keydown",(e)=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); onTap(); }});
-      resetBtn.addEventListener("click", ()=>{ resetSession(); refreshDaily(); });
-      modeSel.addEventListener("change", async (e)=>{ mode=e.target.value; resetSession(); await refreshDaily(); await loadLeaderboard(); });
 
-      resetSession(); await refreshDaily(); await loadLeaderboard();
-      submitBtn.addEventListener("click", submitDaily);
+      modeSel.addEventListener("change", async (e)=>{
+        mode=e.target.value;
+        resetSession();
+        trialNote.style.display = MODES[mode].endless ? "inline-block" : "none";
+        await refreshDaily(); await loadLeaderboard();
+      });
 
+      howBtn.addEventListener("click", openHow);
+      backdropEl.addEventListener("click", closeHow);
+      modalCloseBtn.addEventListener("click", closeHow);
+
+      // init
+      trialNote.style.display = "none";
+      resetSession();
+      await refreshDaily(); await loadLeaderboard();
+
+      // Ad slot
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-tapreflex', slotKey: 'tapreflex' });
-
-      const howtoBtn = document.getElementById("howto-btn");
-      const howtoDlg = document.getElementById("howto-modal");
-      const howtoClose = document.getElementById("howto-close");
-      if (howtoBtn && howtoDlg) {
-        howtoBtn.addEventListener("click", () => { try{ howtoDlg.showModal(); }catch{ howtoDlg.setAttribute("open",""); } });
-      }
-      if (howtoClose && howtoDlg) {
-        howtoClose.addEventListener("click", () => { try{ howtoDlg.close(); }catch{ howtoDlg.removeAttribute("open"); } });
-      }
     });
   </script>
 </head>
@@ -139,20 +221,26 @@
 </header>
 
 <main class="container">
+  <!-- TOP AD -->
   <section class="card ad-top">
     <h2>Ad</h2>
     <div id="ad-tapreflex" class="placeholder-ad"></div>
   </section>
 
+  <!-- GAME -->
   <section class="card">
     <div class="row">
       <h1 style="margin:0">Tap Reflex</h1>
       <span class="badge">DAILY CHALLENGE</span>
-      <button id="howto-btn" class="btn" type="button" style="margin-left:auto">How to play</button>
+      <button id="how" class="btn" type="button" style="margin-left:auto">How to play</button>
     </div>
-    <p class="lead">Wait until the panel turns green, then tap. Choose mode. <b>Trial</b> is endless practice (no leaderboard).</p>
 
-    <div class="row" style="margin-bottom:8px">
+    <p class="lead">
+      Wait until the panel turns <b>green</b>, then tap. Too early = fail.
+      <span id="trial-note" class="badge" style="display:none">Trial mode — endless practice (no submit).</span>
+    </p>
+
+    <div class="row" style="gap:10px; align-items:center">
       <label class="small">Mode:</label>
       <select id="mode" class="select" aria-label="Mode">
         <option value="easy">Easy (1.5–2.7s)</option>
@@ -163,8 +251,17 @@
       <span class="small">Daily submissions used: <b id="daily-counter">—/5</b></span>
     </div>
 
-    <div id="tap" class="tap-area compact ready" tabindex="0" role="button" aria-label="Tap when it turns green">Tap to start</div>
+    <!-- 25s Timer -->
+    <div class="timer-wrap" aria-label="Session timer">
+      <div id="timer-fill" class="timer-fill"></div>
+    </div>
 
+    <!-- Tap area -->
+    <div id="tap" class="tap-area compact ready" tabindex="0" role="button" aria-label="Tap when it turns green">
+      Tap to start (25s)
+    </div>
+
+    <!-- Stats -->
     <div class="stats compact">
       <div class="stat"><div class="label">Last (ms)</div><div class="value" id="last">—</div></div>
       <div class="stat"><div class="label">Average (ms)</div><div class="value" id="avg">—</div></div>
@@ -173,31 +270,23 @@
       <div class="stat"><div class="label">Hi-score (avg)</div><div class="value" id="hi">—</div></div>
     </div>
 
-    <div id="trial-note" class="small" style="display:none; margin-top:6px;">Trial mode: endless practice — Submit/Leaderboard disabled.</div>
-
-    <div class="row" style="margin-top:10px">
-      <button id="reset" class="btn" type="button">Reset session</button>
-      <button id="submit" class="btn" type="button" disabled>Submit to Daily Leaderboard</button>
-    </div>
-
     <div id="leader" style="margin-top:12px"></div>
     <p class="small">Anti-cheat: reactions &lt; 60ms ignored. No decimals. Anonymous device ID.</p>
   </section>
 
-  <dialog id="howto-modal" style="max-width:520px;border:0;border-radius:16px;padding:0;box-shadow:0 20px 60px rgba(0,0,0,.6);">
-    <div class="card" style="margin:0">
-      <h2 style="margin-top:0">How to play</h2>
-      <ul>
-        <li>Tap when the panel turns <b>green</b>. Too early = fail.</li>
-        <li>Make at least <b>5 attempts</b> to submit to the daily board.</li>
-        <li><b>Trial</b> mode is endless practice (no scoreboard).</li>
-      </ul>
-      <div class="row" style="justify-content:flex-end;margin-top:10px">
-        <button id="howto-close" class="btn" type="button">Got it</button>
-      </div>
+  <!-- How to play modal -->
+  <div id="backdrop" class="backdrop"></div>
+  <section id="how-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="how-title">
+    <div class="row">
+      <h2 id="how-title" style="margin:0">How to play</h2>
+      <button id="how-close" class="btn" type="button" style="margin-left:auto">Got it</button>
     </div>
-  </dialog>
-
+    <ul>
+      <li>Tap when the panel turns <b>green</b>. Too early = fail.</li>
+      <li>Each session lasts <b>25 seconds</b>. Your <b>average</b> is auto-submitted when the time ends (non-trial).</li>
+      <li>Trial mode is endless practice — no submit/leaderboard.</li>
+    </ul>
+  </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
