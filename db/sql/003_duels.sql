@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS duels (
+  id BIGSERIAL PRIMARY KEY,
+  game TEXT NOT NULL,
+  seed TEXT NOT NULL,
+  player_a BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  player_b BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  winner BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  spent_credits INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_duels_game_created ON duels (game, created_at DESC);
