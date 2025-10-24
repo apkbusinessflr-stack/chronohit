@@ -50,11 +50,8 @@
 
     let mode="default", running=false, sessionStart=0, timerInt=null, promptTO=null, paceTO=null;
     let score=0, correct=0, wrong=0, streak=0, streakMax=0, total=0;
-    let cassette=false;
 
-    let grid, promptEl, timerFill, modeSel, startBtn, howBtn, cbAssist;
-    let hitsEl, wrongEl, accEl, streakEl, totalEl;
-    let backdrop, modal;
+    let grid, promptEl, timerFill, modeSel, startBtn;
 
     function rnd(n){ return Math.floor(Math.random()*n); }
     function now(){ return performance.now(); }
@@ -117,15 +114,18 @@
       const map = Object.fromEntries(COLORS.map(c=>[c.name,c.hex.toLowerCase()]));
       const chosenHex = chosen ? (map[chosen] || "") : "";
       const inkHex = promptEl.style.color.toLowerCase();
-      const isCorrect = chosenHex and (chosenHex == inkHex);
+      const isCorrect = !!chosenHex && (chosenHex === inkHex);
 
       if(isCorrect){
         score += 1; correct += 1; streak = streak + 1; if (streak > streakMax) streakMax = streak;
-        try{ navigator.vibrate && navigator.vibrate(20); }catch: ...
+        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(_){}
       }else{
         score -= 1; wrong += 1; streak = 0;
-        try{ navigator.vibrate && navigator.vibrate([10,30,10]); }catch: ...
-        promptEl.animate([ { transform:'translateX(0)' }, { transform:'translateX(-6px)' }, { transform:'translateX(6px)' }, { transform:'translateX(0)' } ], { duration: 150 });
+        try{ if(navigator.vibrate) navigator.vibrate([10,30,10]); }catch(_){}
+        promptEl.animate(
+          [ { transform:'translateX(0)' }, { transform:'translateX(-6px)' }, { transform:'translateX(6px)' }, { transform:'translateX(0)' } ],
+          { duration: 150 }
+        );
       }
 
       updateHUD();
@@ -169,8 +169,9 @@
       startBtn.disabled = false; modeSel.disabled = false;
       promptEl.textContent = "Time’s up!";
       if(!MODES[mode].trial){
-        const payload = { game:"sb", device:deviceId, day:todayKey(), score, correct, wrong, streakMax, accuracy: (total? Math.round((correct/total)*100):0), mode };
-        try{ await fetchJSON("/api/score", { method:"POST", body: JSON.stringify(payload) }); }catch{}
+        const accuracy = total ? Math.round((correct/total)*100) : 0;
+        const payload = { game:"sb", device:deviceId, day:todayKey(), score, correct, wrong, streakMax, accuracy, mode };
+        try{ await fetchJSON("/api/score", { method:"POST", body: JSON.stringify(payload) }); }catch(_){}
       }
     }
 
@@ -183,6 +184,7 @@
       timerFill = document.getElementById("timer-fill");
       modeSel   = document.getElementById("mode");
       startBtn  = document.getElementById("start");
+
       document.getElementById("how").addEventListener("click", openHow);
       document.getElementById("how-close").addEventListener("click", closeHow);
       document.getElementById("backdrop").addEventListener("click", closeHow);
@@ -191,8 +193,8 @@
         grid.classList.toggle("cass", e.target.checked);
       });
 
-      document.getElementById("start").addEventListener("click", start);
-      document.getElementById("mode").addEventListener("change", (e)=>{ mode=e.target.value; setPads(); reset(); });
+      startBtn.addEventListener("click", start);
+      modeSel.addEventListener("change", (e)=>{ mode=e.target.value; setPads(); reset(); });
 
       setPads(); reset();
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-stroop', slotKey: 'stroop' });
