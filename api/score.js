@@ -58,7 +58,7 @@ async function incDaily(game, device, day){
 }
 async function pushLeaderboardTap(day, item){
   const { UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN } = process.env;
-  if(!UPSTASH_REDIS_REST_URL || !UPSTASH_REST_TOKEN){ return; }
+  if(!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN){ return; }
   const zkey = `lb:tap:daily:${day}`;
   const member = JSON.stringify({ avg:item.avg, best:item.best, attempts:item.attempts, mode:item.mode });
   const url = `${UPSTASH_REDIS_REST_URL}/zadd/${encodeURIComponent(zkey)}/${item.avg}/${encodeURIComponent(member)}`;
@@ -70,7 +70,7 @@ async function pushLeaderboardSB(day, item){
   if(!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN){ return; }
   const zkey = `lb:sb:daily:${day}`;
   const member = JSON.stringify(item);
-  const zscore = -item.score;
+  const zscore = -item.score; // store negative so higher scores rank first with zrange asc
   const url = `${UPSTASH_REDIS_REST_URL}/zadd/${encodeURIComponent(zkey)}/${zscore}/${encodeURIComponent(member)}`;
   await fetch(url, { headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` } });
   await fetch(`${UPSTASH_REDIS_REST_URL}/expire/${encodeURIComponent(zkey)}/604800`, { headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` } });
