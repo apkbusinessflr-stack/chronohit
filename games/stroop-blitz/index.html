@@ -6,7 +6,7 @@
   <title>Stroop Blitz — ChronoHit</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
 
-  <!-- Dynamic loaders -->
+  <!-- Dynamic loaders (safe, non-blocking) -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
 
@@ -26,6 +26,7 @@
 
   <script type="module">
     import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+
     const deviceId = getDeviceId();
     const SESSION_MS = 25_000;
     const MIN_HUMAN_MS = 120;
@@ -57,7 +58,7 @@
     function now(){ return performance.now(); }
     function pct(a,b){ return b>0 ? Math.round((a/b)*100) : 0; }
 
-    // ✅ Helper: μετατρέπει "#RRGGBB" → "rgb(r, g, b)" για σωστή σύγκριση
+    // Convert "#RRGGBB" → "rgb(r, g, b)" to match computed style format
     function hexToRgbString(hex) {
       const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
       if (!m) return "";
@@ -121,11 +122,11 @@
         return;
       }
 
-      // ✅ Ενοποιημένη σύγκριση χρώματος: και τα δύο σε "rgb(r, g, b)"
+      // Compare chosen color with ink color in unified "rgb(...)" format
       const colorMapHex = Object.fromEntries(COLORS.map(c => [c.name, c.hex.toLowerCase()]));
       const chosenHex = chosen ? (colorMapHex[chosen] || "") : "";
       const chosenRgb = chosenHex ? hexToRgbString(chosenHex) : "";
-      const inkRgb = getComputedStyle(promptEl).color; // π.χ. "rgb(59, 130, 246)"
+      const inkRgb = getComputedStyle(promptEl).color;
 
       const isCorrect = !!chosenRgb && (chosenRgb === inkRgb);
 
@@ -142,16 +143,18 @@
       }
 
       updateHUD();
+
+      // Immediate next prompt (no pace delay)
       clearTimeout(paceTO);
-      paceTO = setTimeout(showPrompt, MODES[mode].paceMs);
+      showPrompt();
     }
 
     function updateHUD(){
-      document.getElementById("hits").textContent = String(correct);
-      document.getElementById("wrong").textContent = String(wrong);
+      document.getElementById("score").textContent  = String(score);
+      document.getElementById("wrong").textContent  = String(wrong);
       document.getElementById("streak").textContent = String(streak);
-      document.getElementById("acc").textContent = pct(correct, total) + "%";
-      document.getElementById("total").textContent = String(total);
+      document.getElementById("acc").textContent    = pct(correct, total) + "%";
+      document.getElementById("total").textContent  = String(total);
     }
 
     function reset(){
@@ -253,7 +256,7 @@
     <div id="grid" class="pad-grid" aria-label="Color choices"></div>
 
     <div class="stats compact" style="margin-top:12px">
-      <div class="stat"><div class="label">Score</div><div class="value" id="hits">0</div></div>
+      <div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
       <div class="stat"><div class="label">Wrong</div><div class="value" id="wrong">0</div></div>
       <div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
       <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">—</div></div>
@@ -277,7 +280,7 @@
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
 
-<!-- Wallet badge -->
+<!-- Wallet badge (non-fatal) -->
 <script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>
