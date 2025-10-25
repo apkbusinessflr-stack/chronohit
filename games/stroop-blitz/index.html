@@ -6,7 +6,7 @@
   <title>Stroop Blitz — ChronoHit</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
 
-  <!-- Dynamic loaders -->
+  <!-- Dynamic loaders (safe, non-blocking) -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
 
@@ -26,10 +26,12 @@
 
   <script type="module">
     import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+
     const deviceId = getDeviceId();
     const SESSION_MS = 25_000;
     const MIN_HUMAN_MS = 120;
 
+    // Available colors
     const COLORS = [
       { name: "RED",    hex: "#FF3B3B", glyph:"●" },
       { name: "BLUE",   hex: "#3B82F6", glyph:"■" },
@@ -41,11 +43,12 @@
       { name: "GRAY",   hex: "#9CA3AF", glyph:"★" },
     ];
 
+    // Modes — αυξήσαμε το prompt window κατά +2000ms σε όλα
     const MODES = {
-      easy:    { label:"Easy",    colors:4, promptMs:1300, paceMs:1400, incongruent:0.60, decoy:false },
-      default: { label:"Default", colors:6, promptMs:1100, paceMs:1200, incongruent:0.70, decoy:true  },
-      hard:    { label:"Hard",    colors:8, promptMs: 900, paceMs:1000, incongruent:0.80, decoy:true  },
-      trial:   { label:"Trial",   colors:6, promptMs:1100, paceMs:1200, incongruent:0.70, decoy:false, trial:true },
+      easy:    { label:"Easy",    colors:4, promptMs:3300, paceMs:1400, incongruent:0.60, decoy:false },
+      default: { label:"Default", colors:6, promptMs:3100, paceMs:1200, incongruent:0.70, decoy:true  },
+      hard:    { label:"Hard",    colors:8, promptMs:2900, paceMs:1000, incongruent:0.80, decoy:true  },
+      trial:   { label:"Trial",   colors:6, promptMs:3100, paceMs:1200, incongruent:0.70, decoy:false, trial:true },
     };
 
     let mode="default", running=false, sessionStart=0, timerInt=null, promptTO=null, paceTO=null;
@@ -56,6 +59,16 @@
     function rnd(n){ return Math.floor(Math.random()*n); }
     function now(){ return performance.now(); }
     function pct(a,b){ return b>0 ? Math.round((a/b)*100) : 0; }
+
+    // Convert "#RRGGBB" → "rgb(r, g, b)" to match computed style format
+    function hexToRgbString(hex) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      if (!m) return "";
+      const r = parseInt(m[1], 16);
+      const g = parseInt(m[2], 16);
+      const b = parseInt(m[3], 16);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
 
     function setPads(){
       const n = MODES[mode].colors;
@@ -95,7 +108,15 @@
       promptEl.style.color = p.ink.hex;
       lastShownAt = now();
       clearTimeout(promptTO);
-      promptTO = setTimeout(()=> onAnswer(null), MODES[mode].promptMs);
+      // ❗ timeout ΔΕΝ μετράει ως λάθος — απλά προχωράμε στο επόμενο prompt
+      promptTO = setTimeout(onTimeout, MODES[mode].promptMs);
+    }
+
+    function onTimeout(){
+      if (!running) return;
+      // δεν αυξάνουμε wrong, δεν αυξάνουμε total — απλά συνεχίζουμε
+      clearTimeout(paceTO);
+      showPrompt();
     }
 
     function onAnswer(chosen){
@@ -105,16 +126,19 @@
 
       const rt = now() - lastShownAt;
       if (rt < MIN_HUMAN_MS) {
-        // ignore too-fast taps; re-arm timeout with remaining time
+        // ignore too-fast taps; re-arm timeout with remaining time, χωρίς καταμέτρηση
         const remain = Math.max(0, MODES[mode].promptMs - rt);
-        promptTO = setTimeout(()=> onAnswer(null), remain);
+        promptTO = setTimeout(onTimeout, remain);
         return;
       }
 
-      const map = Object.fromEntries(COLORS.map(c=>[c.name,c.hex.toLowerCase()]));
-      const chosenHex = chosen ? (map[chosen] || "") : "";
-      const inkHex = promptEl.style.color.toLowerCase();
-      const isCorrect = !!chosenHex && (chosenHex === inkHex);
+      // Compare chosen color with ink color in unified "rgb(...)" format
+      const colorMapHex = Object.fromEntries(COLORS.map(c => [c.name, c.hex.toLowerCase()]));
+      const chosenHex = chosen ? (colorMapHex[chosen] || "") : "";
+      const chosenRgb = chosenHex ? hexToRgbString(chosenHex) : "";
+      const inkRgb = getComputedStyle(promptEl).color;
+
+      const isCorrect = !!chosenRgb && (chosenRgb === inkRgb);
 
       if(isCorrect){
         score += 1; correct += 1; streak = streak + 1; if (streak > streakMax) streakMax = streak;
@@ -129,16 +153,18 @@
       }
 
       updateHUD();
+
+      // Immediate next prompt (no pace delay)
       clearTimeout(paceTO);
-      paceTO = setTimeout(showPrompt, MODES[mode].paceMs);
+      showPrompt();
     }
 
     function updateHUD(){
-      document.getElementById("hits").textContent = String(correct);
-      document.getElementById("wrong").textContent = String(wrong);
+      document.getElementById("score").textContent  = String(score);
+      document.getElementById("wrong").textContent  = String(wrong);
       document.getElementById("streak").textContent = String(streak);
-      document.getElementById("acc").textContent = pct(correct, total) + "%";
-      document.getElementById("total").textContent = String(total);
+      document.getElementById("acc").textContent    = pct(correct, total) + "%";
+      document.getElementById("total").textContent  = String(total);
     }
 
     function reset(){
@@ -168,10 +194,15 @@
       clearInterval(timerInt); clearTimeout(promptTO); clearTimeout(paceTO);
       startBtn.disabled = false; modeSel.disabled = false;
       promptEl.textContent = "Time’s up!";
+      // Καταγραφή σκορ — πάντα όταν δεν είναι trial
       if(!MODES[mode].trial){
         const accuracy = total ? Math.round((correct/total)*100) : 0;
         const payload = { game:"sb", device:deviceId, day:todayKey(), score, correct, wrong, streakMax, accuracy, mode };
-        try{ await fetchJSON("/api/score", { method:"POST", body: JSON.stringify(payload) }); }catch(_){}
+        try{
+          await fetchJSON("/api/score", { method:"POST", body: JSON.stringify(payload) });
+        }catch(_){
+          // σιωπηλό fallback ώστε να μην χαλάει το UI
+        }
       }
     }
 
@@ -204,6 +235,10 @@
 <body>
 <header class="header">
   <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+  <nav class="navright">
+    <span id="wallet-badge" class="badge">Credits: —</span>
+    <a href="/store/" style="margin-left:8px">Store</a>
+  </nav>
 </header>
 
 <main class="container">
@@ -236,7 +271,7 @@
     <div id="grid" class="pad-grid" aria-label="Color choices"></div>
 
     <div class="stats compact" style="margin-top:12px">
-      <div class="stat"><div class="label">Score</div><div class="value" id="hits">0</div></div>
+      <div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
       <div class="stat"><div class="label">Wrong</div><div class="value" id="wrong">0</div></div>
       <div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
       <div class="stat"><div class="label">Accuracy</div><div class="value" id="acc">—</div></div>
@@ -252,12 +287,15 @@
     </div>
     <ul>
       <li>Tap the <b>ink color</b>, not the written word.</li>
-      <li>One answer per prompt. Timeouts count as wrong.</li>
+      <li>One answer per prompt. Timeouts are neutral (no penalty).</li>
       <li>Session lasts <b>25 seconds</b>. Trial mode: practice only (no leaderboard).</li>
     </ul>
   </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+
+<!-- Wallet badge (non-fatal) -->
+<script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>

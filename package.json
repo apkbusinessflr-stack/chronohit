@@ -1,0 +1,16 @@
+{
+  "name": "chronohit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ChronoHit static site + API routes",
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "db:migrate": "node scripts/migrate.js",
+    "db:status": "node scripts/migrate.js --status"
+  },
+  "dependencies": {
+    "pg": "^8.12.0",
+    "stripe": "^16.0.0"
+  }
+}

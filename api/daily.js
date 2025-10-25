@@ -1,27 +1,31 @@
-// /api/daily.js
-export default async function handler(req, res) {
-  try{
-    const url = new URL(req.url, `http://${req.headers.host}`);
+export const config = { runtime: "edge" };
+
+export default async function handler(req) {
+  try {
+    const url = new URL(req.url);
     const device = url.searchParams.get("device");
     const day = url.searchParams.get("day");
-    const game = (url.searchParams.get("game") || "tap").toLowerCase();
-    if(!device || !day) return res.status(400).json({error:"device and day required"});
+    const game = String(url.searchParams.get("game") || "tap").toLowerCase();
+    if (!device || !day) return json({ error: "device and day required" }, 400);
     const used = await getDailyUsed(game, device, day);
-    return res.json({ used });
-  }catch(e){
-    return res.status(500).json({ error: "server error" });
+    return json({ used });
+  } catch {
+    return json({ error: "server error" }, 500);
   }
 }
-async function getDailyUsed(game, device, day){
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+}
+
+async function getDailyUsed(game, device, day) {
   const { UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN } = process.env;
-  if(!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN){
-    return 0; // dev mode
-  }
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return 0;
   const key = `${game}:daily:${day}:${device}:count`;
   const r = await fetch(`${UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` }
+    headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` },
   });
-  const j = await r.json();
-  const v = j.result;
-  return v ? parseInt(v,10) : 0;
+  const j = await r.json().catch(() => ({}));
+  const v = j?.result;
+  return v ? parseInt(v, 10) : 0;
 }

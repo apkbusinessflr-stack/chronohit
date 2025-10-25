@@ -5,11 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ChronoHit — Play & Compete</title>
   <link rel="stylesheet" href="/assets/chronohit.css" />
-
-  <!-- Dynamic GA4 (reads GA_MEASUREMENT_ID via /api/ga-config) -->
+  <!-- Loaders (non-blocking, resilient) -->
   <script src="/assets/ga-loader.js"></script>
-
-  <!-- Dynamic AdSense (reads ADSENSE_* via /api/ads-config) -->
   <script src="/assets/ads-loader.js"></script>
 </head>
 <body>
@@ -18,15 +15,18 @@
     <img src="/assets/logo.svg" alt="" />
     <span class="brand">ChronoHit</span>
   </a>
-  <nav class="navright"><span class="badge">LIVE</span></nav>
+  <nav class="navright">
+    <a href="/store/">Store</a>
+    <span id="wallet-badge" class="badge" style="margin-left:8px">Credits: —</span>
+    <span class="badge" style="margin-left:8px">LIVE</span>
+  </nav>
 </header>
 
 <main class="container">
   <!-- TOP AD (home) -->
   <section class="card ad-top">
     <h2>Ad</h2>
-    <!-- CLS-safe placeholder; ChronoAds will inject the responsive ad slot (home) -->
-    <div id="ad-home" class="ad-slot"></div>
+    <div id="ad-home" class="ad-slot" aria-label="advertisement"></div>
   </section>
 
   <!-- Intro -->
@@ -58,20 +58,20 @@
   </section>
 
   <section class="card">
-  <h2>Stroop Blitz</h2>
-  <p class="lead">Tap the ink color, not the word. 25s. Fast, tricky, addictive.</p>
-  <a class="btn" href="/games/stroop-blitz/">Play →</a>
-</section>
-
+    <h2>Stroop Blitz</h2>
+    <p class="lead">Ink color vs word. Accuracy + speed decide.</p>
+    <a class="btn" href="/games/stroop-blitz/">Play →</a>
+  </section>
 </main>
 
 <footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
 
-<!-- Trigger dynamic ad load (call after consent if using CMP) -->
+<!-- Trigger dynamic ad load (safe/no-op if misconfigured) -->
 <script>
-  if (window.ChronoAds) {
-    ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
-  }
+  try { window.ChronoAds?.load?.({ targetId: "ad-home", slotKey: "home" }); } catch {}
 </script>
+
+<!-- Wallet badge (non-fatal if userId absent) -->
+<script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>
