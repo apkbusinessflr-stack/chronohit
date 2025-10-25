@@ -1,133 +1,93 @@
+// api/score.js
+// Edge: γράφει σκορ/leaderboards στο Upstash,
+// αλλά πρώτα χρεώνει credits μέσω /api/wallet (Node).
 export const config = { runtime: "edge" };
 
-/**
- * Submit score for ANY game.
- * Policy:
- * - Play-count limit: max 3 submits / day / device / game (ανεξάρτητα mode).
- * - Aggregation:
- *    - game === "tap": κρατάμε BEST (MIN avg) ανά device+mode για weekly/monthly.
- *    - όλα τα άλλα games: SUM(score) ανά device+mode για weekly/monthly.
- * - Αποθήκευση μόνο weekly/monthly (όχι daily leaderboards).
- * - Απαιτούμε: { game, device, day(YYYYMMDD), mode, ...scoreFields }
- */
+const COST_PER_PLAY = { // credits per round
+  sb: 1, // Stroop Blitz
+  tt: 1, // Tapping Test (παράδειγμα)
+  ct: 1, // Chasing Target (παράδειγμα)
+  default: 1
+};
+
+function weekOf(yyyymmdd) {
+  // ISO week: YYYYWW
+  const s = String(yyyymmdd);
+  const y = +s.slice(0,4), m = +s.slice(4,6)-1, d = +s.slice(6,8);
+  const dt = new Date(Date.UTC(y,m,d));
+  const day = (dt.getUTCDay() + 6) % 7; // 0=Mon
+  dt.setUTCDate(dt.getUTCDate() - day + 3);
+  const firstThu = new Date(Date.UTC(dt.getUTCFullYear(),0,4));
+  const wk = 1 + Math.round((dt - firstThu)/(7*24*3600*1000));
+  return dt.getUTCFullYear()*100 + wk;
+}
+function monthOf(yyyymmdd){ return Math.floor(+yyyymmdd/100); }
+function kv(obj){ return Object.entries(obj).map(([k,v])=>`${encodeURIComponent(k)}/${encodeURIComponent(String(v))}`).join('/'); }
+
 export default async function handler(req) {
-  try {
-    if (req.method !== "POST") return json({ error: "POST only" }, 405);
-    const body = await req.json().catch(() => ({}));
-
-    const game   = String(body?.game || "").toLowerCase();
-    const device = String(body?.device || "");
-    const day    = String(body?.day || "");           // YYYYMMDD UTC
-    const mode   = String(body?.mode || "default");   // capture per difficulty
-
-    if (!game || !device || !/^\d{8}$/.test(day)) {
-      return json({ error: "game/device/day required" }, 400);
-    }
-
-    // --- Daily play-count limit: 3 per game/day/device (independent of mode)
-    const DAILY_LIMIT = 3;
-    const used = await incrDailyCounter(game, device, day);
-    if (used > DAILY_LIMIT) return json({ error: "daily limit reached", used }, 429);
-
-    const { isoYear, isoWeek } = isoWeekOf(parseDay(day));
-    const weekKey  = `${isoYear}${pad2(isoWeek)}`; // YYYYWW
-    const monthKey = yyyymm(parseDay(day));        // YYYYMM
-
-    if (game === "tap") {
-      const avg = Number(body?.avg);
-      if (!Number.isFinite(avg)) return json({ error: "avg required for tap" }, 400);
-
-      await zmin(`lb:${game}:${mode}:weekly:${weekKey}`,  device, Math.round(avg));
-      await zmin(`lb:${game}:${mode}:monthly:${monthKey}`, device, Math.round(avg));
-      return json({ ok: true, used });
-    }
-
-    // Default rule for ALL other games: SUM(score) per device+mode
-    const score = Number(body?.score);
-    if (!Number.isFinite(score)) return json({ error: "score required" }, 400);
-
-    await zincr(`lb:${game}:${mode}:weekly:${weekKey}`,  device, Math.round(score));
-    await zincr(`lb:${game}:${mode}:monthly:${monthKey}`, device, Math.round(score));
-    return json({ ok: true, used });
-  } catch {
-    return json({ error: "server error" }, 500);
-  }
-}
-
-/* ----------------------- Helpers ----------------------- */
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
-}
-function env() {
+  if (req.method !== "POST") return new Response(JSON.stringify({ ok:false, error:"Method not allowed" }), { status:405 });
   const { UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN } = process.env;
-  return { url: UPSTASH_REDIS_REST_URL, token: UPSTASH_REDIS_REST_TOKEN };
+  if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+    return new Response(JSON.stringify({ ok:false, error:"missing_upstash_env" }), { status:500 });
+  }
+
+  let body = {};
+  try {
+    body = await req.json();
+  } catch { /* ignore */ }
+
+  const game   = String(body.game||"").trim();         // π.χ. "sb"
+  const device = String(body.device||"").trim();
+  const day    = String(body.day||"").trim();          // YYYYMMDD
+  const mode   = String(body.mode||"").trim();         // easy/default/hard
+  const score  = Number(body.score||0);
+
+  if (!game || !device || !day || !mode || !Number.isFinite(score)) {
+    return new Response(JSON.stringify({ ok:false, error:"invalid_payload" }), { status:400 });
+  }
+
+  // 1) Χρέωση credits ΠΡΙΝ γράψουμε σκορ (αν αποτύχει -> 402)
+  try {
+    const consume = COST_PER_PLAY[game] ?? COST_PER_PLAY.default;
+    const walletResp = await fetch(`${new URL(req.url).origin}/api/wallet`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op:"consume", amount: consume, uuid: device })
+    });
+    if (walletResp.status === 402) {
+      const j = await walletResp.json().catch(()=>null);
+      return new Response(JSON.stringify({ ok:false, error:"insufficient_credits", ...(j||{}) }), { status:402 });
+    }
+    if (!walletResp.ok) {
+      // προσωρινό πρόβλημα wallet -> μην κάψουμε τη γύρα, καλύτερα 503
+      return new Response(JSON.stringify({ ok:false, error:"wallet_unavailable" }), { status:503 });
+    }
+  } catch {
+    return new Response(JSON.stringify({ ok:false, error:"wallet_unavailable" }), { status:503 });
+  }
+
+  // 2) Γράψε leaderboards & plays counters
+  const week = weekOf(day), month = monthOf(day);
+  const auth = { headers: { Authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}` } };
+
+  // Keys
+  const kWeekly   = `lb:${game}:${mode}:weekly:${week}`;
+  const kMonthly  = `lb:${game}:${mode}:monthly:${month}`;
+  const kPlaysTot = `plays:${game}:total:${device}`;
+  const kPlaysW   = `plays:${game}:weekly:${device}:${week}`;
+  const kPlaysM   = `plays:${game}:monthly:${device}:${month}`;
+
+  // Write helper
+  async function upstash(path){ return fetch(`${UPSTASH_REDIS_REST_URL}/${path}`, auth); }
+
+  // Σωρευτικό score (για sb ct κ.λπ.) — για tap test ίσως MIN(avg), αλλά εδώ κρατάμε SUM
+  await Promise.all([
+    upstash(`zincrby/${encodeURIComponent(kWeekly)}/${encodeURIComponent(String(score))}/${encodeURIComponent(device)}`),
+    upstash(`zincrby/${encodeURIComponent(kMonthly)}/${encodeURIComponent(String(score))}/${encodeURIComponent(device)}`),
+    upstash(`incr/${encodeURIComponent(kPlaysTot)}`),
+    upstash(`incr/${encodeURIComponent(kPlaysW)}`),
+    upstash(`incr/${encodeURIComponent(kPlaysM)}`)
+  ]);
+
+  return new Response(JSON.stringify({ ok:true }), { status:200, headers: { "content-type":"application/json" }});
 }
-
-// Daily submit counter (μόνο για limit — όχι daily leaderboard)
-async function incrDailyCounter(game, device, day) {
-  const { url, token } = env();
-  if (!url || !token) return 1; // dev fallback
-  const key = `plays:${game}:${day}:${device}`;
-
-  // INCR (θα επιστρέψει 1..N) + expire στο τέλος της ημέρας (UTC)
-  await fetch(`${url}/incr/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` } });
-  await fetch(`${url}/expireat/${encodeURIComponent(key)}/${endOfDayUnix(day)}`, { headers: { Authorization: `Bearer ${token}` } });
-
-  const r = await fetch(`${url}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` } });
-  const j = await r.json().catch(() => ({}));
-  return j?.result ? parseInt(j.result, 10) : 1;
-}
-
-// Aggregations
-async function zincr(zkey, member, byScore) {
-  const { url, token } = env();
-  if (!url || !token) return;
-  await fetch(`${url}/zincrby/${encodeURIComponent(zkey)}/${encodeURIComponent(byScore)}/${encodeURIComponent(member)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  // κράτα ~90 μέρες
-  await fetch(`${url}/expire/${encodeURIComponent(zkey)}/7776000`, { headers: { Authorization: `Bearer ${token}` } });
-}
-async function zmin(zkey, member, maybeLowerScore) {
-  const { url, token } = env();
-  if (!url || !token) return;
-
-  // διάβασε τρέχον
-  let current = null;
-  const r = await fetch(`${url}/zscore/${encodeURIComponent(zkey)}/${encodeURIComponent(member)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const j = await r.json().catch(() => ({}));
-  if (j?.result !== null && j?.result !== undefined) current = parseFloat(j.result);
-
-  const scoreToKeep = current === null ? maybeLowerScore : Math.min(current, maybeLowerScore);
-
-  await fetch(`${url}/zadd/${encodeURIComponent(zkey)}/${scoreToKeep}/${encodeURIComponent(member)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  await fetch(`${url}/expire/${encodeURIComponent(zkey)}/7776000`, { headers: { Authorization: `Bearer ${token}` } });
-}
-
-// Time helpers
-function endOfDayUnix(day) {
-  const { y, m, d } = parseDay(day);
-  const dt = Date.UTC(y, m - 1, d, 23, 59, 59);
-  return Math.floor(dt / 1000);
-}
-function parseDay(day) {
-  const y = parseInt(day.slice(0, 4), 10);
-  const m = parseInt(day.slice(4, 6), 10);
-  const d = parseInt(day.slice(6, 8), 10);
-  return { y, m, d };
-}
-function isoWeekOf({ y, m, d }) {
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dayNum = (dt.getUTCDay() + 6) % 7;
-  dt.setUTCDate(dt.getUTCDate() - dayNum + 3);
-  const isoYear = dt.getUTCFullYear();
-  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
-  const week = 1 + Math.round(((dt - jan4) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
-  return { isoYear, isoWeek: week };
-}
-function yyyymm({ y, m }) { return `${y}${pad2(m)}`; }
-function pad2(n) { return n < 10 ? `0${n}` : `${n}`; }
