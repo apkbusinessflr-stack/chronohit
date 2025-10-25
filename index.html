@@ -4,82 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ChronoHit — Play & Compete</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/assets/chronohit.css" />
-  <nav class="navright"><a href="/store/">Store</a></nav>
-
-  
-  <!-- Dynamic GA4 (reads GA_MEASUREMENT_ID via /api/ga-config) -->
+  <!-- Loaders -->
   <script src="/assets/ga-loader.js"></script>
-
-  <!-- Dynamic AdSense (reads ADSENSE_* via /api/ads-config) -->
   <script src="/assets/ads-loader.js"></script>
 </head>
 <body>
 <header class="header">
-  <a href="/" class="logo" aria-label="ChronoHit Home">
-    <img src="/assets/logo.svg" alt="" />
-    <span class="brand">ChronoHit</span>
-  </a>
-  <nav class="navright">
-    <span id="wallet-badge" class="badge">Credits: —</span>
-    <a href="/store/" style="margin-left:8px">Store</a>
-    <span class="badge" style="margin-left:8px">LIVE</span>
-  </nav>
+  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
+  <nav class="navright"><a href="/store/">Store</a></nav>
+  <span id="wallet-badge" class="badge">Credits: —</span>
 </header>
 
 <main class="container">
-  <!-- TOP AD (home) -->
-  <section class="card ad-top">
-    <h2>Ad</h2>
-    <!-- CLS-safe placeholder; ChronoAds will inject the responsive ad slot (home) -->
-    <div id="ad-home" class="ad-slot"></div>
-  </section>
-
-  <!-- Intro -->
-  <section class="card">
-    <h1>Play &amp; Compete</h1>
-    <p class="lead">
-      Reflex and focus mini-games. Beat your <b>Best Single</b> and chase your <b>Hi-Score (avg)</b>.
-      New free credits daily.
-    </p>
-  </section>
-
-  <!-- Games -->
-  <section class="card">
-    <h2>Tap Reflex</h2>
-    <p class="lead">Tap when the panel turns green. Simple, brutal, accurate.</p>
-    <a class="btn" href="/games/tap-reflex/">Play →</a>
-  </section>
-
-  <section class="card">
-    <h2>Sequence Sprint</h2>
-    <p class="lead">Watch &amp; repeat the pad sequence (3×3 / 3×4 / 4×4). Longest streak wins.</p>
-    <a class="btn" href="/games/sequence-sprint/">Play →</a>
-  </section>
-
-  <section class="card">
-    <h2>Target Rush</h2>
-    <p class="lead">30-second rush. Hit the targets fast. Higher score wins.</p>
-    <a class="btn" href="/games/target-rush/">Play →</a>
-  </section>
-
-  <section class="card">
-  <h2>Stroop Blitz</h2>
-  <p class="lead">Tap the ink color, not the word. 25s. Fast, tricky, addictive.</p>
-  <a class="btn" href="/games/stroop-blitz/">Play →</a>
-</section>
-
+  <!-- ... υπάρχον περιεχόμενο ... -->
+  <div id="ad-home" class="ad-slot" aria-label="advertisement"></div>
+  <script>window.ChronoAds?.load?.({ targetId: "ad-home", slotKey: "home" });</script>
 </main>
 
-<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
-
-<!-- Trigger dynamic ad load (call after consent if using CMP) -->
-<script>
-  if (window.ChronoAds) {
-    ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
-  }
-</script>
-<!-- Wallet badge -->
+<footer class="footer">© 2025 ChronoHit</footer>
 <script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>
