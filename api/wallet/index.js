@@ -1,10 +1,6 @@
 // api/wallet/index.js
-// ESM + Node runtime. Ασφαλές για Neon Postgres.
-// Παρέχει:
-//   GET  /api/wallet?uuid=<user_uuid>           -> { ok:true, uuid, credits }
-//   POST /api/wallet    { uuid, delta }         -> { ok:true, uuid, credits_after }
-//      - delta: ακέραιος, π.χ. +100 από checkout
-//   (δημιουργεί τον πίνακα wallets αν δεν υπάρχει)
+// Δέχεται ΚΑΙ uuid ΚΑΙ user_id (aliases) σε GET/POST.
+// ESM + Node runtime. Neon Postgres via pg.
 
 export const config = { runtime: "nodejs" };
 
@@ -12,6 +8,17 @@ import { Client } from "pg";
 
 function bad(res, code, msg) {
   return res.status(code).json({ ok: false, error: msg });
+}
+
+function getUuidAlias(obj) {
+  // Δέχεται uuid ή user_id (snake/camel) από query ή body
+  const v =
+    obj?.uuid ??
+    obj?.user_id ??
+    obj?.userId ??
+    obj?.USER_ID ??
+    obj?.UUID;
+  return (typeof v === "string" ? v.trim() : "");
 }
 
 async function withClient(fn) {
@@ -26,9 +33,8 @@ async function withClient(fn) {
   }
 }
 
-async function ensureSchema(client) {
-  // Δημιουργεί wallets αν δεν υπάρχει (μία φορά). credits >= 0
-  await client.query(`
+async function ensureSchema(db) {
+  await db.query(`
     CREATE TABLE IF NOT EXISTS wallets (
       uuid TEXT PRIMARY KEY,
       credits INTEGER NOT NULL DEFAULT 0,
@@ -42,7 +48,7 @@ export default async function handler(req, res) {
     const method = req.method || "GET";
 
     if (method === "GET") {
-      const uuid = String(req.query?.uuid || "").trim();
+      const uuid = getUuidAlias(req.query);
       if (!uuid) return bad(res, 400, "uuid required");
 
       const out = await withClient(async (db) => {
@@ -55,42 +61,38 @@ export default async function handler(req, res) {
     }
 
     if (method === "POST") {
-      // Body: { uuid, delta }
+      // Body μπορεί να έχει uuid ή user_id
       let body = {};
       try {
         const chunks = [];
         for await (const c of req) chunks.push(c);
-        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+        body = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
       } catch {
         return bad(res, 400, "invalid json");
       }
 
-      const uuid = String(body?.uuid || "").trim();
+      const uuid = getUuidAlias(body);
       const delta = Number(body?.delta);
 
       if (!uuid) return bad(res, 400, "uuid required");
       if (!Number.isInteger(delta)) return bad(res, 400, "delta must be integer");
-
-      // Guard: απορρίπτουμε υπερβολικές πιστώσεις από public endpoints
       if (Math.abs(delta) > 100000) return bad(res, 400, "delta out of range");
 
       const out = await withClient(async (db) => {
         await ensureSchema(db);
-        // Upsert + clamp σε 0 ελάχιστο
         const result = await db.query(
           `
           INSERT INTO wallets (uuid, credits)
           VALUES ($1, GREATEST(0, $2))
           ON CONFLICT (uuid)
           DO UPDATE SET
-            credits = GREATEST(0, wallets.credits + EXCLUDED.credits),
+            credits   = GREATEST(0, wallets.credits + EXCLUDED.credits),
             updated_at = NOW()
           RETURNING credits;
         `,
           [uuid, delta]
         );
-        const credits_after = Number(result.rows[0].credits);
-        return { ok: true, uuid, credits_after };
+        return { ok: true, uuid, credits_after: Number(result.rows[0].credits) };
       });
 
       return res.status(200).json(out);
