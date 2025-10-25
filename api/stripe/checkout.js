@@ -3,7 +3,7 @@
 // REQ: POST { priceId: string, userId: string }
 // χρησιμοποιεί metadata για να μεταφέρει credits & user_id στον webhook
 
-export const config = { runtime: "nodejs18.x" };
+export const config = { runtime: "nodejs" };
 
 import Stripe from "stripe";
 
