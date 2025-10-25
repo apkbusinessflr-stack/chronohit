@@ -20,7 +20,11 @@
     <img src="/assets/logo.svg" alt="" />
     <span class="brand">ChronoHit</span>
   </a>
-  <nav class="navright"><span class="badge">LIVE</span></nav>
+  <nav class="navright">
+    <span id="wallet-badge" class="badge">Credits: —</span>
+    <a href="/store/" style="margin-left:8px">Store</a>
+    <span class="badge" style="margin-left:8px">LIVE</span>
+  </nav>
 </header>
 
 <main class="container">
@@ -75,5 +79,7 @@
     ChronoAds.load({ targetId: 'ad-home', slotKey: 'home' });
   }
 </script>
+<!-- Wallet badge -->
+<script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>
