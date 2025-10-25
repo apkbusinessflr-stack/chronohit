@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "ChronoHit static site + API routes",
-  "engines": { "node": "18.x" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "db:migrate": "node scripts/migrate.js",
     "db:status": "node scripts/migrate.js --status",
