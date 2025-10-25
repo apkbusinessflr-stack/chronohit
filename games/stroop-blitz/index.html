@@ -26,6 +26,7 @@
 
   <script type="module">
     import { getDeviceId, todayKey, fetchJSON } from "/assets/utils.js";
+    import { shareScore, makeShareUrl, captureReferral } from "/assets/share.js";
 
     const deviceId = getDeviceId();
     const SESSION_MS = 25_000;
@@ -206,6 +207,13 @@
       }
     }
 
+    
+    function triggerShare() {
+      const shareText = `I scored ${score} on Stroop Blitz (${mode}). Can you beat me?`;
+      const shareUrl = makeShareUrl("/games/stroop-blitz/", { ref: deviceId, mode });
+      shareScore({ title: "ChronoHit — Stroop Blitz", text: shareText, url: shareUrl });
+    }
+
     function openHow(){ document.getElementById('backdrop').classList.add('open'); document.getElementById('how-modal').classList.add('open'); }
     function closeHow(){ document.getElementById('backdrop').classList.remove('open'); document.getElementById('how-modal').classList.remove('open'); }
 
@@ -215,6 +223,7 @@
       timerFill = document.getElementById("timer-fill");
       modeSel   = document.getElementById("mode");
       startBtn  = document.getElementById("start");
+      const shareBtn = document.getElementById("share-btn");
 
       document.getElementById("how").addEventListener("click", openHow);
       document.getElementById("how-close").addEventListener("click", closeHow);
@@ -225,8 +234,11 @@
       });
 
       startBtn.addEventListener("click", start);
-      modeSel.addEventListener("change", (e)=>{ mode=e.target.value; setPads(); reset(); });
+      shareBtn.addEventListener("click", triggerShare);
+      modeSel.addEventListener("change", (e)=>{ mode=e.target.value; captureReferral();
+      setPads(); reset(); });
 
+      captureReferral();
       setPads(); reset();
       if (window.ChronoAds) ChronoAds.load({ targetId: 'ad-stroop', slotKey: 'stroop' });
     });
@@ -264,6 +276,7 @@
       </select>
       <label class="small"><input id="cb-assist" type="checkbox" /> Color-blind assist</label>
       <button id="start" class="btn" type="button" style="margin-left:auto">Start</button>
+      <button id="share-btn" class="btn" type="button" title="Share" style="margin-left:8px">Share</button>
     </div>
 
     <div class="timer-wrap"><div id="timer-fill" class="timer-fill"></div></div>
@@ -290,7 +303,6 @@
       <li>One answer per prompt. Timeouts are neutral (no penalty).</li>
       <li>Session lasts <b>25 seconds</b>. Trial mode: practice only (no leaderboard).</li>
     </ul>
-    <p class="small">Tip: Share your best score with friends and challenge them!</p>
   </section>
 </main>
 
