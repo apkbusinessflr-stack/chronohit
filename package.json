@@ -3,11 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "description": "ChronoHit static site + API routes",
+  "type": "module",
   "engines": { "node": "22.x" },
   "scripts": {
     "db:migrate": "node scripts/migrate.js",
-    "db:status": "node scripts/migrate.js --status",
-    "check:env": "node -e \"if(!process.env.DATABASE_URL){console.error('Missing DATABASE_URL');process.exit(1)}else{console.log('DATABASE_URL OK')}\""
+    "db:status": "node scripts/migrate.js --status"
   },
   "dependencies": {
     "pg": "^8.12.0",
