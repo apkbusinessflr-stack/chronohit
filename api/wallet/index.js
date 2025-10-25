@@ -1,5 +1,5 @@
 // api/wallet/index.js
-// Δέχεται ΚΑΙ uuid ΚΑΙ user_id (aliases) σε GET/POST.
+// Συμβατό και με wallets(user_id, credits) και με wallets(uuid, credits)
 // ESM + Node runtime. Neon Postgres via pg.
 
 export const config = { runtime: "nodejs" };
@@ -8,17 +8,6 @@ import { Client } from "pg";
 
 function bad(res, code, msg) {
   return res.status(code).json({ ok: false, error: msg });
-}
-
-function getUuidAlias(obj) {
-  // Δέχεται uuid ή user_id (snake/camel) από query ή body
-  const v =
-    obj?.uuid ??
-    obj?.user_id ??
-    obj?.userId ??
-    obj?.USER_ID ??
-    obj?.UUID;
-  return (typeof v === "string" ? v.trim() : "");
 }
 
 async function withClient(fn) {
@@ -33,14 +22,40 @@ async function withClient(fn) {
   }
 }
 
-async function ensureSchema(db) {
+// Αν δεν υπάρχει καθόλου πίνακας, τον δημιουργούμε με user_id (για συμβατότητα)
+async function ensureTable(db) {
   await db.query(`
     CREATE TABLE IF NOT EXISTS wallets (
-      uuid TEXT PRIMARY KEY,
+      user_id TEXT PRIMARY KEY,
       credits INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+}
+
+// Επιστρέφει ποια στήλη ταυτότητας υπάρχει: 'user_id' ή 'uuid'
+async function detectIdColumn(db) {
+  const q = `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'wallets'
+      AND column_name IN ('user_id','uuid')
+    ORDER BY CASE column_name WHEN 'user_id' THEN 0 ELSE 1 END
+    LIMIT 1;
+  `;
+  const r = await db.query(q);
+  if (r.rowCount) return r.rows[0].column_name;
+  return "user_id";
+}
+
+function getIdAlias(obj) {
+  const v =
+    obj?.uuid ??
+    obj?.user_id ??
+    obj?.userId ??
+    obj?.USER_ID ??
+    obj?.UUID;
+  return typeof v === "string" ? v.trim() : "";
 }
 
 export default async function handler(req, res) {
@@ -48,51 +63,58 @@ export default async function handler(req, res) {
     const method = req.method || "GET";
 
     if (method === "GET") {
-      const uuid = getUuidAlias(req.query);
-      if (!uuid) return bad(res, 400, "uuid required");
+      const id = getIdAlias(req.query);
+      if (!id) return bad(res, 400, "uuid required"); // μήνυμα ίδιο για απλότητα
 
       const out = await withClient(async (db) => {
-        await ensureSchema(db);
-        const r = await db.query("SELECT credits FROM wallets WHERE uuid = $1", [uuid]);
+        await ensureTable(db);
+        const idCol = await detectIdColumn(db);             // 'user_id' ή 'uuid'
+        const r = await db.query(`SELECT credits FROM wallets WHERE ${idCol} = $1`, [id]);
         const credits = r.rowCount ? Number(r.rows[0].credits) : 0;
-        return { ok: true, uuid, credits };
+        return { ok: true, uuid: id, credits };
       });
+
       return res.status(200).json(out);
     }
 
     if (method === "POST") {
-      // Body μπορεί να έχει uuid ή user_id
+      // Body: { uuid | user_id, delta }
       let body = {};
       try {
         const chunks = [];
         for await (const c of req) chunks.push(c);
-        body = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}");
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
       } catch {
         return bad(res, 400, "invalid json");
       }
 
-      const uuid = getUuidAlias(body);
+      const id = getIdAlias(body);
       const delta = Number(body?.delta);
 
-      if (!uuid) return bad(res, 400, "uuid required");
+      if (!id) return bad(res, 400, "uuid required");
       if (!Number.isInteger(delta)) return bad(res, 400, "delta must be integer");
       if (Math.abs(delta) > 100000) return bad(res, 400, "delta out of range");
 
       const out = await withClient(async (db) => {
-        await ensureSchema(db);
-        const result = await db.query(
-          `
-          INSERT INTO wallets (uuid, credits)
+        await ensureTable(db);
+        const idCol = await detectIdColumn(db); // 'user_id' ή 'uuid'
+
+        // Αν δεν υπάρχει unique constraint στο επιλεγμένο idCol, δημιούργησέ το (μία φορά)
+        // (Ασφαλές: IF NOT EXISTS)
+        await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS wallets_${idCol}_uniq ON wallets(${idCol});`);
+
+        // Upsert + clamp >= 0
+        const sql = `
+          INSERT INTO wallets (${idCol}, credits)
           VALUES ($1, GREATEST(0, $2))
-          ON CONFLICT (uuid)
+          ON CONFLICT (${idCol})
           DO UPDATE SET
-            credits   = GREATEST(0, wallets.credits + EXCLUDED.credits),
+            credits    = GREATEST(0, wallets.credits + EXCLUDED.credits),
             updated_at = NOW()
           RETURNING credits;
-        `,
-          [uuid, delta]
-        );
-        return { ok: true, uuid, credits_after: Number(result.rows[0].credits) };
+        `;
+        const r = await db.query(sql, [id, delta]);
+        return { ok: true, uuid: id, credits_after: Number(r.rows[0].credits) };
       });
 
       return res.status(200).json(out);
