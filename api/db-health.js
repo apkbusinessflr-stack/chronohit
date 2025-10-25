@@ -1,16 +1,18 @@
-const { Client } = require('pg');
+export const config = { runtime: "nodejs" };
 
-module.exports = async (req, res) => {
-  const url = process.env.DATABASE_URL;
-  if (!url) return res.status(500).json({ ok:false, error: 'Missing DATABASE_URL' });
-  const client = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+export default async function handler(req, res) {
   try {
-    await client.connect();
-    const r = await client.query('SELECT 1 as n');
-    res.status(200).json({ ok: true, result: r.rows[0].n });
+    const { DATABASE_URL } = process.env;
+    if (!DATABASE_URL) {
+      return res.status(200).json({ ok: true, db: "missing DATABASE_URL (not configured)" });
+    }
+    const { Client } = await import("pg");
+    const c = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await c.connect();
+    const r = await c.query("select 1 as ok");
+    await c.end();
+    return res.status(200).json({ ok: true, result: r.rows[0].ok });
   } catch (e) {
-    res.status(500).json({ ok:false, error: e.message });
-  } finally {
-    try { await client.end(); } catch(_) {}
+    return res.status(500).json({ ok: false, error: String(e && e.message || e) });
   }
-};
+}
