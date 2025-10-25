@@ -57,6 +57,16 @@
     function now(){ return performance.now(); }
     function pct(a,b){ return b>0 ? Math.round((a/b)*100) : 0; }
 
+    // ✅ Helper: μετατρέπει "#RRGGBB" → "rgb(r, g, b)" για σωστή σύγκριση
+    function hexToRgbString(hex) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      if (!m) return "";
+      const r = parseInt(m[1], 16);
+      const g = parseInt(m[2], 16);
+      const b = parseInt(m[3], 16);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
     function setPads(){
       const n = MODES[mode].colors;
       const palette = COLORS.slice(0, n);
@@ -111,10 +121,13 @@
         return;
       }
 
-      const map = Object.fromEntries(COLORS.map(c=>[c.name,c.hex.toLowerCase()]));
-      const chosenHex = chosen ? (map[chosen] || "") : "";
-      const inkHex = promptEl.style.color.toLowerCase();
-      const isCorrect = !!chosenHex && (chosenHex === inkHex);
+      // ✅ Ενοποιημένη σύγκριση χρώματος: και τα δύο σε "rgb(r, g, b)"
+      const colorMapHex = Object.fromEntries(COLORS.map(c => [c.name, c.hex.toLowerCase()]));
+      const chosenHex = chosen ? (colorMapHex[chosen] || "") : "";
+      const chosenRgb = chosenHex ? hexToRgbString(chosenHex) : "";
+      const inkRgb = getComputedStyle(promptEl).color; // π.χ. "rgb(59, 130, 246)"
+
+      const isCorrect = !!chosenRgb && (chosenRgb === inkRgb);
 
       if(isCorrect){
         score += 1; correct += 1; streak = streak + 1; if (streak > streakMax) streakMax = streak;
