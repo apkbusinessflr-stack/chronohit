@@ -4,26 +4,74 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ChronoHit — Play & Compete</title>
-  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/assets/chronohit.css" />
-  <!-- Loaders -->
+  <!-- Loaders (non-blocking, resilient) -->
   <script src="/assets/ga-loader.js"></script>
   <script src="/assets/ads-loader.js"></script>
 </head>
 <body>
 <header class="header">
-  <a href="/" class="logo"><img src="/assets/logo.svg" alt=""><span class="brand">ChronoHit</span></a>
-  <nav class="navright"><a href="/store/">Store</a></nav>
-  <span id="wallet-badge" class="badge">Credits: —</span>
+  <a href="/" class="logo" aria-label="ChronoHit Home">
+    <img src="/assets/logo.svg" alt="" />
+    <span class="brand">ChronoHit</span>
+  </a>
+  <nav class="navright">
+    <a href="/store/">Store</a>
+    <span id="wallet-badge" class="badge" style="margin-left:8px">Credits: —</span>
+    <span class="badge" style="margin-left:8px">LIVE</span>
+  </nav>
 </header>
 
 <main class="container">
-  <!-- ... υπάρχον περιεχόμενο ... -->
-  <div id="ad-home" class="ad-slot" aria-label="advertisement"></div>
-  <script>window.ChronoAds?.load?.({ targetId: "ad-home", slotKey: "home" });</script>
+  <!-- TOP AD (home) -->
+  <section class="card ad-top">
+    <h2>Ad</h2>
+    <div id="ad-home" class="ad-slot" aria-label="advertisement"></div>
+  </section>
+
+  <!-- Intro -->
+  <section class="card">
+    <h1>Play &amp; Compete</h1>
+    <p class="lead">
+      Reflex and focus mini-games. Beat your <b>Best Single</b> and chase your <b>Hi-Score (avg)</b>.
+      New free credits daily.
+    </p>
+  </section>
+
+  <!-- Games -->
+  <section class="card">
+    <h2>Tap Reflex</h2>
+    <p class="lead">Tap when the panel turns green. Simple, brutal, accurate.</p>
+    <a class="btn" href="/games/tap-reflex/">Play →</a>
+  </section>
+
+  <section class="card">
+    <h2>Sequence Sprint</h2>
+    <p class="lead">Watch &amp; repeat the pad sequence (3×3 / 3×4 / 4×4). Longest streak wins.</p>
+    <a class="btn" href="/games/sequence-sprint/">Play →</a>
+  </section>
+
+  <section class="card">
+    <h2>Target Rush</h2>
+    <p class="lead">30-second rush. Hit the targets fast. Higher score wins.</p>
+    <a class="btn" href="/games/target-rush/">Play →</a>
+  </section>
+
+  <section class="card">
+    <h2>Stroop Blitz</h2>
+    <p class="lead">Ink color vs word. Accuracy + speed decide.</p>
+    <a class="btn" href="/games/stroop-blitz/">Play →</a>
+  </section>
 </main>
 
-<footer class="footer">© 2025 ChronoHit</footer>
+<footer class="footer">© 2025 ChronoHit — Every millisecond counts</footer>
+
+<!-- Trigger dynamic ad load (safe/no-op if misconfigured) -->
+<script>
+  try { window.ChronoAds?.load?.({ targetId: "ad-home", slotKey: "home" }); } catch {}
+</script>
+
+<!-- Wallet badge (non-fatal if userId absent) -->
 <script type="module" src="/assets/wallet-badge.js"></script>
 </body>
 </html>
